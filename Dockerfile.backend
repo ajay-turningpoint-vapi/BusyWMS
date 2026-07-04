@@ -1,0 +1,22 @@
+# Dockerfile for Node.js Backend
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install build dependencies for native modules (if SQLite/MSSQL needs compilation)
+RUN apk add --no-repeat python3 make g++
+
+COPY backend/package*.json ./
+RUN npm ci
+
+COPY backend/ ./
+RUN npm run build
+
+EXPOSE 5000
+
+ENV NODE_ENV=production
+ENV PORT=5000
+ENV DB_TYPE=SQLITE
+ENV SQLITE_PATH=/app/database/wms.db
+
+CMD ["npm", "start"]

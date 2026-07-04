@@ -1,0 +1,397 @@
+import { Response } from 'express';
+import { db } from '../../config/db';
+import { AuthenticatedRequest } from '../middlewares/auth';
+import { OrderValidator } from '../../services/OrderValidator';
+
+export class GrnController {
+
+  public static async getPendingPOs(req: AuthenticatedRequest, res: Response) {
+    try {
+      // Get unique pending POs list
+      const rows = await db.query(`
+        SELECT DISTINCT POId, POCode, VendorName, VendorCode, OrderDate 
+        FROM vw_PendingGRN
+        ORDER BY OrderDate DESC, POId DESC
+      `);
+      return res.json(rows);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async getPODetails(req: AuthenticatedRequest, res: Response) {
+    const { poId } = req.params;
+    try {
+      const rows = await db.query(`
+        SELECT * FROM vw_PendingGRN WHERE POId = @poId
+      `, { poId });
+      return res.json(rows);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  // Create Goods Receipt Note
+  public static async createGRN(req: AuthenticatedRequest, res: Response) {
+    const { poId, invoiceNo, items } = req.body;
+    const userId = req.user?.userId || 1;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: 'Items list is required' });
+    }
+
+    try {
+      // Check if Quality Assurance Check feature is enabled
+      const qaConfig = await db.query('SELECT IsEnabled FROM tblFeatureConfig WHERE FeatureCode = "MODULE_QUALITY_ASSURANCE"');
+      const isQaEnabled = qaConfig.length > 0 ? qaConfig[0].IsEnabled === 1 : true;
+
+      // 1. Insert parent GRN record
+      const grnCode = `GRN-${Date.now()}`;
+      const grnStatus = isQaEnabled ? 'PENDING' : 'QC_COMPLETED';
+      const grnResult = await db.executeCmd(`
+        INSERT INTO tblGRN (GRNCode, POId, ReceivedDate, InvoiceNo, ReceivedBy, Status)
+        VALUES (@grnCode, @poId, CURRENT_TIMESTAMP, @invoiceNo, @userId, @grnStatus)
+      `, { grnCode, poId: poId || null, invoiceNo: invoiceNo || null, userId, grnStatus });
+
+      const grnId = grnResult.lastID!;
+
+      // 2. Loop through GRN details — skip items with zero received quantity (BUG-010)
+      const validItems = items.filter((item: any) => item.receivedQty > 0);
+      if (validItems.length === 0) {
+        // Rollback the GRN header if no valid items
+        await db.executeCmd('DELETE FROM tblGRN WHERE GRNId = @grnId', { grnId });
+        return res.status(400).json({ message: 'At least one item must have a received quantity greater than zero' });
+      }
+
+      for (const item of validItems) {
+        let batchId: number | null = null;
+
+        // Resolve item configurations directly from DB to prevent client discrepancies
+        const itemRows = await db.query('SELECT TrackBatch, TrackSerial FROM tblItem WHERE ItemId = @itemId', { itemId: item.itemId });
+        const isBatchTracked = itemRows.length > 0 ? (itemRows[0].TrackBatch === 1) : false;
+        const isSerialTracked = itemRows.length > 0 ? (itemRows[0].TrackSerial === 1) : false;
+
+        // Auto batch handling if item tracks batch
+        if (isBatchTracked && item.batchNumber) {
+          const existingBatch = await db.query(`
+            SELECT BatchId FROM tblBatch WHERE ItemId = @itemId AND BatchNumber = @batchNumber
+          `, { itemId: item.itemId, batchNumber: item.batchNumber });
+
+          if (existingBatch.length > 0) {
+            batchId = existingBatch[0].BatchId;
+          } else {
+            const batchResult = await db.executeCmd(`
+              INSERT INTO tblBatch (ItemId, BatchNumber, ExpiryDate)
+              VALUES (@itemId, @batchNumber, @expiryDate)
+            `, { itemId: item.itemId, batchNumber: item.batchNumber, expiryDate: item.expiryDate || null });
+            
+            batchId = batchResult.lastID ?? null;
+          }
+        }
+
+        // Insert detail line
+        const acceptedQty = isQaEnabled ? 0.0 : item.receivedQty;
+        await db.executeCmd(`
+          INSERT INTO tblGRNDetail (GRNId, ItemId, BatchId, ReceivedQty, AcceptedQty, RejectedQty, PutawayQty)
+          VALUES (@grnId, @itemId, @batchId, @receivedQty, @acceptedQty, 0.0, 0.0)
+        `, {
+          grnId,
+          itemId: item.itemId,
+          batchId,
+          receivedQty: item.receivedQty,
+          acceptedQty
+        });
+
+        // Insert serial numbers if tracked
+        const serials = [];
+        if (item.serialNumbers && Array.isArray(item.serialNumbers)) {
+          serials.push(...item.serialNumbers);
+        } else if (item.serialNumber) {
+          serials.push(item.serialNumber);
+        }
+
+        if (isSerialTracked && serials.length > 0) {
+          const serialStatus = isQaEnabled ? 'QC_HOLD' : 'IN_STOCK';
+          for (const sn of serials) {
+            await db.executeCmd(`
+              INSERT INTO tblSerialNo (ItemId, BatchId, SerialNumber, Status)
+              VALUES (@itemId, @batchId, @sn, @serialStatus)
+            `, { itemId: item.itemId, batchId, sn, serialStatus });
+          }
+        }
+      }
+
+      if (!isQaEnabled) {
+        // If QA is disabled, call the stored procedure immediately to adjust PO received levels
+        await db.executeSp('sp_ProcessGRN', { GRNId: grnId, UserId: userId });
+      }
+
+      return res.status(201).json({ 
+        message: isQaEnabled ? 'GRN created successfully' : 'GRN created and auto-approved successfully (QA Bypassed)', 
+        grnId, 
+        grnCode 
+      });
+    } catch (err: any) {
+      console.error('GRN creation failed:', err);
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  // Quality Control check processing
+  public static async processQC(req: AuthenticatedRequest, res: Response) {
+    const { grnId, status, remarks, items } = req.body;
+    const userId = req.user?.userId || 1;
+
+    if (!grnId || !status || !items || !Array.isArray(items)) {
+      return res.status(400).json({ message: 'Missing inspection details' });
+    }
+
+    try {
+      // 1. Create QC record
+      await db.executeCmd(`
+        INSERT INTO tblQC (GRNId, CheckedBy, CheckedDate, Status, Remarks)
+        VALUES (@grnId, @userId, CURRENT_TIMESTAMP, @status, @remarks)
+      `, { grnId, userId, status, remarks: remarks || null });
+
+      // 2. Process inspection details for each item
+      for (const item of items) {
+        await db.executeCmd(`
+          UPDATE tblGRNDetail
+          SET AcceptedQty = @acceptedQty,
+              RejectedQty = @rejectedQty,
+              RejectionReason = @rejectionReason
+          WHERE GRNId = @grnId AND ItemId = @itemId
+        `, {
+          acceptedQty: item.acceptedQty,
+          rejectedQty: item.rejectedQty,
+          rejectionReason: item.rejectionReason || null,
+          grnId,
+          itemId: item.itemId
+        });
+
+        // ISSUE-025 FIX: Process rejected serials FIRST, then accept the REST
+        // Previous code accepted all serials AFTER marking rejected ones, overwriting the rejected status
+        const rejectedSnSet = new Set<string>((item.rejectedSerials || []).map((s: string) => s.trim()));
+
+        if (item.rejectedSerials && Array.isArray(item.rejectedSerials) && item.rejectedSerials.length > 0) {
+          for (const rsn of item.rejectedSerials) {
+            await db.executeCmd(
+              `UPDATE tblSerialNo SET Status = 'QC_REJECTED' WHERE ItemId = @itemId AND SerialNumber = @rsn`,
+              { itemId: item.itemId, rsn }
+            );
+          }
+        }
+
+        // Accept ONLY serials still in QC_HOLD (not the ones just marked rejected)
+        await db.executeCmd(`
+          UPDATE tblSerialNo 
+          SET Status = 'IN_STOCK' 
+          WHERE ItemId = @itemId AND Status = 'QC_HOLD'
+        `, { itemId: item.itemId });
+      }
+
+      // 3. Fire Stored Procedure to update PO Received levels and set GRN status
+      await db.executeSp('sp_ProcessGRN', { GRNId: grnId, UserId: userId });
+
+      return res.json({ message: 'Quality check completed and GRN status updated' });
+    } catch (err: any) {
+      console.error('QC Processing failed:', err);
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  // Get active GRNs (e.g. for listing/tracking)
+  public static async getGRNs(req: AuthenticatedRequest, res: Response) {
+    try {
+      const rows = await db.query(`
+        SELECT g.*, po.POCode, u.FullName AS OperatorName
+        FROM tblGRN g
+        LEFT JOIN tblPurchaseOrder po ON g.POId = po.POId
+        INNER JOIN tblUser u ON g.ReceivedBy = u.UserId
+        ORDER BY g.GRNId DESC
+      `);
+      return res.json(rows);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async getGRNDetails(req: AuthenticatedRequest, res: Response) {
+    const { grnId } = req.params;
+    try {
+      const rows = await db.query(`
+        SELECT gd.*, item.Code AS ItemCode, item.Name AS ItemName, item.UOM, b.BatchNumber
+        FROM tblGRNDetail gd
+        INNER JOIN tblItem item ON gd.ItemId = item.ItemId
+        LEFT JOIN tblBatch b ON gd.BatchId = b.BatchId
+        WHERE gd.GRNId = @grnId
+      `, { grnId });
+      return res.json(rows);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  // ==========================================
+  // PURCHASE ORDER CRUD (MANUAL)
+  // ==========================================
+  
+  public static async getPurchaseOrders(req: AuthenticatedRequest, res: Response) {
+    try {
+      const rows = await db.query('SELECT * FROM tblPurchaseOrder ORDER BY OrderDate DESC, POId DESC');
+      return res.json(rows);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async getPODetailLines(req: AuthenticatedRequest, res: Response) {
+    const { poId } = req.params;
+    try {
+      const rows = await db.query(`
+        SELECT pod.*, i.Name AS ItemName, i.Code AS ItemCode 
+        FROM tblPurchaseOrderDetail pod
+        INNER JOIN tblItem i ON pod.ItemId = i.ItemId
+        WHERE pod.POId = @poId
+      `, { poId });
+      return res.json(rows);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async createPurchaseOrder(req: AuthenticatedRequest, res: Response) {
+    const { POCode, VendorName, VendorCode, OrderDate, DeliveryDate, Items } = req.body;
+    try {
+      const validation = await OrderValidator.validate({
+        OrderCode: POCode,
+        PartnerName: VendorName,
+        PartnerCode: VendorCode,
+        OrderDate,
+        DeliveryDate,
+        Items
+      }, 'PO');
+
+      if (!validation.isValid) {
+        return res.status(400).json({ message: 'Validation failed', errors: validation.errors });
+      }
+
+      const orderCode = POCode ? POCode.trim() : `PO-${Date.now()}`;
+
+      const poId = await db.transaction(async (tx) => {
+        const result = await tx.executeCmd(`
+          INSERT INTO tblPurchaseOrder (POCode, VendorName, VendorCode, OrderDate, DeliveryDate, Status)
+          VALUES (@orderCode, @VendorName, @VendorCode, @OrderDate, @DeliveryDate, 'PENDING')
+        `, {
+          orderCode,
+          VendorName: VendorName.trim(),
+          VendorCode: VendorCode.trim(),
+          OrderDate,
+          DeliveryDate: DeliveryDate || null
+        });
+
+        const newPoId = result.lastID!;
+
+        for (const item of validation.cleanedItems!) {
+          await tx.executeCmd(`
+            INSERT INTO tblPurchaseOrderDetail (POId, ItemId, OrderQty, ReceivedQty, UOM, UnitPrice)
+            VALUES (@poId, @ItemId, @OrderQty, 0.0, @UOM, @UnitPrice)
+          `, {
+            poId: newPoId,
+            ItemId: item.ItemId,
+            OrderQty: item.OrderQty,
+            UOM: item.UOM,
+            UnitPrice: item.UnitPrice
+          });
+        }
+        return newPoId;
+      });
+
+      return res.status(201).json({ message: 'Purchase Order created successfully', poId, POCode: orderCode });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async updatePurchaseOrder(req: AuthenticatedRequest, res: Response) {
+    const { poId } = req.params;
+    const { POCode, VendorName, VendorCode, OrderDate, DeliveryDate, Items } = req.body;
+    try {
+      const existing = await db.query('SELECT Status FROM tblPurchaseOrder WHERE POId = @poId', { poId });
+      if (existing.length === 0) {
+        return res.status(404).json({ message: 'Purchase Order not found' });
+      }
+      if (existing[0].Status !== 'PENDING') {
+        return res.status(400).json({ message: 'Only PENDING Purchase Orders can be modified.' });
+      }
+
+      const validation = await OrderValidator.validate({
+        OrderCode: POCode,
+        PartnerName: VendorName,
+        PartnerCode: VendorCode,
+        OrderDate,
+        DeliveryDate,
+        Items
+      }, 'PO', Number(poId));
+
+      if (!validation.isValid) {
+        return res.status(400).json({ message: 'Validation failed', errors: validation.errors });
+      }
+
+      await db.transaction(async (tx) => {
+        await tx.executeCmd(`
+          UPDATE tblPurchaseOrder
+          SET POCode = @POCode, VendorName = @VendorName, VendorCode = @VendorCode, OrderDate = @OrderDate, DeliveryDate = @DeliveryDate, UpdatedAt = CURRENT_TIMESTAMP
+          WHERE POId = @poId
+        `, {
+          POCode: POCode.trim(),
+          VendorName: VendorName.trim(),
+          VendorCode: VendorCode.trim(),
+          OrderDate,
+          DeliveryDate: DeliveryDate || null,
+          poId
+        });
+
+        await tx.executeCmd('DELETE FROM tblPurchaseOrderDetail WHERE POId = @poId', { poId });
+
+        for (const item of validation.cleanedItems!) {
+          await tx.executeCmd(`
+            INSERT INTO tblPurchaseOrderDetail (POId, ItemId, OrderQty, ReceivedQty, UOM, UnitPrice)
+            VALUES (@poId, @ItemId, @OrderQty, 0.0, @UOM, @UnitPrice)
+          `, {
+            poId,
+            ItemId: item.ItemId,
+            OrderQty: item.OrderQty,
+            UOM: item.UOM,
+            UnitPrice: item.UnitPrice
+          });
+        }
+      });
+
+      return res.json({ message: 'Purchase Order updated successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async deletePurchaseOrder(req: AuthenticatedRequest, res: Response) {
+    const { poId } = req.params;
+    try {
+      const existing = await db.query('SELECT Status FROM tblPurchaseOrder WHERE POId = @poId', { poId });
+      if (existing.length === 0) {
+        return res.status(404).json({ message: 'Purchase Order not found' });
+      }
+      if (existing[0].Status !== 'PENDING') {
+        return res.status(400).json({ message: 'Only PENDING Purchase Orders can be deleted.' });
+      }
+
+      await db.transaction(async (tx) => {
+        await tx.executeCmd('DELETE FROM tblPurchaseOrderDetail WHERE POId = @poId', { poId });
+        await tx.executeCmd('DELETE FROM tblPurchaseOrder WHERE POId = @poId', { poId });
+      });
+      return res.json({ message: 'Purchase Order deleted successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+}
