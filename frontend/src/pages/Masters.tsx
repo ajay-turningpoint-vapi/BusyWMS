@@ -6,7 +6,7 @@ import {
   FormControl, InputLabel, Select, MenuItem, Switch, FormControlLabel,
   CircularProgress, Alert, InputAdornment
 } from '@mui/material';
-import { Plus, Search, MapPin, Layers, Inbox, ShieldCheck, User, Printer, FileDown } from 'lucide-react';
+import { Plus, Search, MapPin, Layers, Inbox, ShieldCheck, User, Printer, FileDown, RefreshCw } from 'lucide-react';
 import api from '../services/api';
 import BarcodePrintDialog from '../components/BarcodePrintDialog';
 import { useAuthStore } from '../store/authStore';
@@ -24,7 +24,7 @@ export default function Masters() {
   
   // Modal states
   const [openModal, setOpenModal] = useState(false);
-  const [modalType, setModalType] = useState<'warehouse' | 'zone' | 'aisle' | 'rack' | 'shelf' | 'bin' | 'item' | 'user'>('warehouse');
+  const [modalType, setModalType] = useState<'warehouse' | 'zone' | 'aisle' | 'rack' | 'shelf' | 'bin' | 'item' | 'user' | 'customer' | 'supplier'>('warehouse');
   const [formData, setFormData] = useState<any>({});
   const [isEditMode, setIsEditMode] = useState(false);
   const [editRecordId, setEditRecordId] = useState<number | string | null>(null);
@@ -49,6 +49,110 @@ export default function Masters() {
   const [racks, setRacks] = useState<any[]>([]);
   const [shelves, setShelves] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
+  const [itemsPageData, setItemsPageData] = useState<any[]>([]);
+  const [itemsTotalCount, setItemsTotalCount] = useState(0);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [syncingItems, setSyncingItems] = useState(false);
+
+  const [customersPageData, setCustomersPageData] = useState<any[]>([]);
+  const [customersTotalCount, setCustomersTotalCount] = useState(0);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [syncingCustomers, setSyncingCustomers] = useState(false);
+
+  const [suppliersPageData, setSuppliersPageData] = useState<any[]>([]);
+  const [suppliersTotalCount, setSuppliersTotalCount] = useState(0);
+  const [suppliersLoading, setSuppliersLoading] = useState(false);
+  const [syncingSuppliers, setSyncingSuppliers] = useState(false);
+
+  const fetchCustomers = (page: number, limit: number, search: string) => {
+    setCustomersLoading(true);
+    api.get(`/masters/customers?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`)
+      .then((res) => {
+        setCustomersPageData(res.data.items || []);
+        setCustomersTotalCount(res.data.total || 0);
+        setCustomersLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        toast.showError('Failed to load customers.');
+        setCustomersLoading(false);
+      });
+  };
+
+  const fetchSuppliers = (page: number, limit: number, search: string) => {
+    setSuppliersLoading(true);
+    api.get(`/masters/suppliers?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`)
+      .then((res) => {
+        setSuppliersPageData(res.data.items || []);
+        setSuppliersTotalCount(res.data.total || 0);
+        setSuppliersLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        toast.showError('Failed to load suppliers.');
+        setSuppliersLoading(false);
+      });
+  };
+
+  const handleSyncCustomers = async () => {
+    setSyncingCustomers(true);
+    try {
+      const res = await api.post('/sync/customers');
+      toast.showSuccess(res.data.message || 'ERP Customers synced successfully!');
+      pagination.resetPage();
+      fetchCustomers(0, pagination.rowsPerPage, searchQuery);
+    } catch (err: any) {
+      console.error(err);
+      toast.showError(err.response?.data?.message || 'Customer synchronization failed.');
+    } finally {
+      setSyncingCustomers(false);
+    }
+  };
+
+  const handleSyncSuppliers = async () => {
+    setSyncingSuppliers(true);
+    try {
+      const res = await api.post('/sync/suppliers');
+      toast.showSuccess(res.data.message || 'ERP Suppliers synced successfully!');
+      pagination.resetPage();
+      fetchSuppliers(0, pagination.rowsPerPage, searchQuery);
+    } catch (err: any) {
+      console.error(err);
+      toast.showError(err.response?.data?.message || 'Supplier synchronization failed.');
+    } finally {
+      setSyncingSuppliers(false);
+    }
+  };
+
+  const fetchItems = (page: number, limit: number, search: string) => {
+    setItemsLoading(true);
+    api.get(`/masters/items?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`)
+      .then((res) => {
+        setItemsPageData(res.data.items || []);
+        setItemsTotalCount(res.data.total || 0);
+        setItemsLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        toast.showError('Failed to load items catalogue.');
+        setItemsLoading(false);
+      });
+  };
+
+  const handleSyncItems = async () => {
+    setSyncingItems(true);
+    try {
+      const res = await api.post('/sync/items');
+      toast.showSuccess(res.data.message || 'ERP Items synced successfully!');
+      pagination.resetPage();
+      fetchItems(0, pagination.rowsPerPage, searchQuery);
+    } catch (err: any) {
+      console.error(err);
+      toast.showError(err.response?.data?.message || 'Item synchronization failed.');
+    } finally {
+      setSyncingItems(false);
+    }
+  };
 
   // Permissions check
   const { user } = useAuthStore();
@@ -63,8 +167,8 @@ export default function Masters() {
     if (index === 3) endpoint = '/masters/shelves';
     if (index === 4) endpoint = '/masters/bins';
     if (index === 5) endpoint = '/masters/items?inBinsOnly=true';
-    if (index === 6) endpoint = '/masters/users';
-    if (index === 7) endpoint = '/masters/aisles';
+    if (index === 8) endpoint = '/masters/users';
+    if (index === 9) endpoint = '/masters/aisles';
 
     api.get(endpoint)
       .then((res) => {
@@ -78,9 +182,30 @@ export default function Masters() {
   };
 
   useEffect(() => {
-    fetchTab(tabValue);
-    pagination.resetPage();
+    if (tabValue === 5) {
+      pagination.resetPage();
+      fetchItems(0, pagination.rowsPerPage, searchQuery);
+    } else if (tabValue === 6) {
+      pagination.resetPage();
+      fetchCustomers(0, pagination.rowsPerPage, searchQuery);
+    } else if (tabValue === 7) {
+      pagination.resetPage();
+      fetchSuppliers(0, pagination.rowsPerPage, searchQuery);
+    } else {
+      fetchTab(tabValue);
+      pagination.resetPage();
+    }
   }, [tabValue]);
+
+  useEffect(() => {
+    if (tabValue === 5) {
+      fetchItems(pagination.page, pagination.rowsPerPage, searchQuery);
+    } else if (tabValue === 6) {
+      fetchCustomers(pagination.page, pagination.rowsPerPage, searchQuery);
+    } else if (tabValue === 7) {
+      fetchSuppliers(pagination.page, pagination.rowsPerPage, searchQuery);
+    }
+  }, [pagination.page, pagination.rowsPerPage, searchQuery, tabValue]);
 
   // Load lookups when opening dialogs
   const loadLookups = async () => {
@@ -185,6 +310,26 @@ export default function Masters() {
         password: ''
       };
     }
+    if (type === 'customer' || type === 'supplier') {
+      return {
+        code: row.Code || '',
+        name: row.Name || '',
+        alias: row.Alias || '',
+        parentGrp: row.ParentGrp || '',
+        mobile: row.Mobile || '',
+        email: row.Email || '',
+        add1: row.Add1 || '',
+        add2: row.Add2 || '',
+        add3: row.Add3 || '',
+        add4: row.Add4 || '',
+        gstin: row.GSTIN || '',
+        station: row.Station || '',
+        country: row.Country || '',
+        pincode: row.Pincode || '',
+        state: row.State || '',
+        isActive: row.IsActive === 1 || row.IsActive === true
+      };
+    }
     return {};
   };
 
@@ -199,8 +344,10 @@ export default function Masters() {
     if (tabValue === 3) setModalType('shelf');
     if (tabValue === 4) setModalType('bin');
     if (tabValue === 5) setModalType('item');
-    if (tabValue === 6) setModalType('user');
-    if (tabValue === 7) setModalType('aisle');
+    if (tabValue === 6) setModalType('customer');
+    if (tabValue === 7) setModalType('supplier');
+    if (tabValue === 8) setModalType('user');
+    if (tabValue === 9) setModalType('aisle');
     setOpenModal(true);
   };
 
@@ -216,6 +363,8 @@ export default function Masters() {
       type === 'shelf' ? row.ShelfId :
       type === 'bin' ? row.BinId :
       type === 'item' ? row.ItemId :
+      type === 'customer' ? row.CustomerId :
+      type === 'supplier' ? row.SupplierId :
       row.UserId;
     setEditRecordId(id);
     setFormData(mapRowToForm(row, type));
@@ -238,12 +387,22 @@ export default function Masters() {
     if (type === 'shelf') endpoint = `/masters/shelves/${id}`;
     if (type === 'bin') endpoint = `/masters/bins/${id}`;
     if (type === 'item') endpoint = `/masters/items/${id}`;
+    if (type === 'customer') endpoint = `/masters/customers/${id}`;
+    if (type === 'supplier') endpoint = `/masters/suppliers/${id}`;
     if (type === 'user') endpoint = `/masters/users/${id}`;
 
     try {
       await api.delete(endpoint);
       toast.showSuccess(`${type} deleted successfully.`);
-      fetchTab(tabValue);
+      if (tabValue === 5) {
+        fetchItems(pagination.page, pagination.rowsPerPage, searchQuery);
+      } else if (tabValue === 6) {
+        fetchCustomers(pagination.page, pagination.rowsPerPage, searchQuery);
+      } else if (tabValue === 7) {
+        fetchSuppliers(pagination.page, pagination.rowsPerPage, searchQuery);
+      } else {
+        fetchTab(tabValue);
+      }
     } catch (err: any) {
       toast.showError(err.response?.data?.message || `Failed to delete ${type}`);
     }
@@ -286,15 +445,25 @@ export default function Masters() {
     if (modalType === 'shelf') endpoint = '/masters/shelves';
     if (modalType === 'bin') endpoint = '/masters/bins';
     if (modalType === 'item') endpoint = '/masters/items';
+    if (modalType === 'customer') endpoint = '/masters/customers';
+    if (modalType === 'supplier') endpoint = '/masters/suppliers';
     if (modalType === 'user') endpoint = isEditMode ? `/masters/users/${editRecordId}` : '/auth/register';
 
     if (isEditMode && modalType !== 'user') {
       endpoint = `${endpoint}/${editRecordId}`;
     }
 
+    const submissionData = { ...formData };
+    if (modalType === 'customer' && !isEditMode && !submissionData.code) {
+      submissionData.code = 'CUST-' + Date.now();
+    }
+    if (modalType === 'supplier' && !isEditMode && !submissionData.code) {
+      submissionData.code = 'SUPP-' + Date.now();
+    }
+
     try {
       if (isEditMode) {
-        await api.put(endpoint, formData);
+        await api.put(endpoint, submissionData);
       } else {
         if (modalType === 'user') {
           // user registration needs standard payload mapping
@@ -307,18 +476,27 @@ export default function Masters() {
             warehouseId: formData.warehouseId
           });
         } else {
-          await api.post(endpoint, formData);
+          await api.post(endpoint, submissionData);
         }
       }
       handleCloseModal();
       toast.showSuccess('Record saved successfully.');
-      fetchTab(tabValue);
+      if (tabValue === 5) {
+        fetchItems(pagination.page, pagination.rowsPerPage, searchQuery);
+      } else if (tabValue === 6) {
+        fetchCustomers(pagination.page, pagination.rowsPerPage, searchQuery);
+      } else if (tabValue === 7) {
+        fetchSuppliers(pagination.page, pagination.rowsPerPage, searchQuery);
+      } else {
+        fetchTab(tabValue);
+      }
     } catch (err: any) {
       toast.showError(err.response?.data?.message || 'Failed to save master item');
     }
   };
 
   const filteredData = useMemo(() => {
+    if (tabValue === 5 || tabValue === 6 || tabValue === 7) return []; // Managed server-side
     return data.filter((row: any) => {
       const query = searchQuery.toLowerCase();
       return (
@@ -329,7 +507,7 @@ export default function Masters() {
         (row.FullName && row.FullName.toLowerCase().includes(query))
       );
     });
-  }, [data, searchQuery]);
+  }, [data, searchQuery, tabValue]);
 
   const paginatedData = pagination.paginate(filteredData);
 
@@ -346,13 +524,65 @@ export default function Masters() {
     } else if (tabValue === 4) {
       headers = [{ key: 'BinId', header: 'Bin ID' }, { key: 'Code', header: 'Code' }, { key: 'Barcode', header: 'Barcode' }, { key: 'CapacityWeight', header: 'Capacity Weight' }, { key: 'CapacityVolume', header: 'Capacity Volume' }];
     } else if (tabValue === 5) {
-      headers = [{ key: 'ItemId', header: 'Item ID' }, { key: 'Code', header: 'Code' }, { key: 'Name', header: 'Name' }, { key: 'Category', header: 'Category' }, { key: 'UOM', header: 'UOM' }];
+      headers = [
+        { key: 'ItemId', header: 'Item ID' },
+        { key: 'Name', header: 'Name' },
+        { key: 'Code', header: 'Item Code' },
+        { key: 'Alias', header: 'Alias' },
+        { key: 'HSNCode', header: 'HSN Code' },
+        { key: 'Category', header: 'Item Group' },
+        { key: 'AltSalePrice', header: 'Alt Sale Price' },
+        { key: 'AltPurchPrice', header: 'Alt Purch Price' },
+        { key: 'MRP', header: 'MRP' },
+        { key: 'SaleDiscount', header: 'Sale Discount' },
+        { key: 'MainUnit', header: 'Main Unit' },
+        { key: 'AltUnit', header: 'Alt Unit' }
+      ];
     } else if (tabValue === 6) {
-      headers = [{ key: 'UserId', header: 'User ID' }, { key: 'Username', header: 'Username' }, { key: 'FullName', header: 'Full Name' }, { key: 'Email', header: 'Email' }, { key: 'RoleName', header: 'Role' }];
+      headers = [
+        { key: 'CustomerId', header: 'Customer ID' },
+        { key: 'Name', header: 'Name' },
+        { key: 'Code', header: 'Customer Code' },
+        { key: 'Mobile', header: 'Mobile' },
+        { key: 'Email', header: 'Email' },
+        { key: 'Add1', header: 'Address Line 1' },
+        { key: 'Add2', header: 'Address Line 2' },
+        { key: 'Add3', header: 'Address Line 3' },
+        { key: 'Add4', header: 'Address Line 4' },
+        { key: 'GSTIN', header: 'GST No' },
+        { key: 'Station', header: 'Station' },
+        { key: 'Country', header: 'Country' },
+        { key: 'Pincode', header: 'Pincode' },
+        { key: 'State', header: 'State' }
+      ];
     } else if (tabValue === 7) {
+      headers = [
+        { key: 'SupplierId', header: 'Supplier ID' },
+        { key: 'Name', header: 'Name' },
+        { key: 'Code', header: 'Supplier Code' },
+        { key: 'Mobile', header: 'Mobile' },
+        { key: 'Email', header: 'Email' },
+        { key: 'Add1', header: 'Address Line 1' },
+        { key: 'Add2', header: 'Address Line 2' },
+        { key: 'Add3', header: 'Address Line 3' },
+        { key: 'Add4', header: 'Address Line 4' },
+        { key: 'GSTIN', header: 'GST No' },
+        { key: 'Station', header: 'Station' },
+        { key: 'Country', header: 'Country' },
+        { key: 'Pincode', header: 'Pincode' },
+        { key: 'State', header: 'State' }
+      ];
+    } else if (tabValue === 8) {
+      headers = [{ key: 'UserId', header: 'User ID' }, { key: 'Username', header: 'Username' }, { key: 'FullName', header: 'Full Name' }, { key: 'Email', header: 'Email' }, { key: 'RoleName', header: 'Role' }];
+    } else if (tabValue === 9) {
       headers = [{ key: 'AisleId', header: 'Aisle ID' }, { key: 'WarehouseName', header: 'Warehouse' }, { key: 'Code', header: 'Code' }, { key: 'Name', header: 'Name' }];
     }
-    exportToCSV(filteredData, headers, `WMS_Master_Tab_${tabValue}`);
+    const exportData = 
+      tabValue === 5 ? itemsPageData : 
+      tabValue === 6 ? customersPageData : 
+      tabValue === 7 ? suppliersPageData : 
+      filteredData;
+    exportToCSV(exportData, headers, `WMS_Master_Tab_${tabValue}`);
   };
 
   return (
@@ -363,6 +593,42 @@ export default function Masters() {
           <Typography variant="body2" color="text.secondary">Manage warehouse locations, zones, racks, shelves, physical bins, items, and users.</Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5 }}>
+          {tabValue === 5 && (
+            <Button 
+              variant="contained" 
+              color="secondary"
+              startIcon={syncingItems ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
+              onClick={handleSyncItems}
+              disabled={syncingItems}
+              sx={{ fontWeight: 600 }}
+            >
+              {syncingItems ? 'Syncing...' : 'Sync ERP Items'}
+            </Button>
+          )}
+          {tabValue === 6 && (
+            <Button 
+              variant="contained" 
+              color="secondary"
+              startIcon={syncingCustomers ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
+              onClick={handleSyncCustomers}
+              disabled={syncingCustomers}
+              sx={{ fontWeight: 600 }}
+            >
+              {syncingCustomers ? 'Syncing...' : 'Sync ERP Customers'}
+            </Button>
+          )}
+          {tabValue === 7 && (
+            <Button 
+              variant="contained" 
+              color="secondary"
+              startIcon={syncingSuppliers ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
+              onClick={handleSyncSuppliers}
+              disabled={syncingSuppliers}
+              sx={{ fontWeight: 600 }}
+            >
+              {syncingSuppliers ? 'Syncing...' : 'Sync ERP Suppliers'}
+            </Button>
+          )}
           <Button variant="outlined" startIcon={<FileDown size={16} />} onClick={handleExportCSV} sx={{ fontWeight: 600 }}>
             Export CSV
           </Button>
@@ -389,6 +655,8 @@ export default function Masters() {
         <Tab icon={<Layers size={16} />} iconPosition="start" label="Shelves" />
         <Tab icon={<Inbox size={16} />} iconPosition="start" label="Bins" />
         <Tab icon={<Layers size={16} />} iconPosition="start" label="Items Catalogue" />
+        <Tab icon={<User size={16} />} iconPosition="start" label="Customers" />
+        <Tab icon={<User size={16} />} iconPosition="start" label="Suppliers" />
         <Tab icon={<User size={16} />} iconPosition="start" label="Users & RBAC" />
         <Tab icon={<Layers size={16} />} iconPosition="start" label="Aisles" />
       </Tabs>
@@ -397,16 +665,17 @@ export default function Masters() {
       <Box sx={{ display: 'flex', gap: 1.5, mb: 3, alignItems: 'center' }}>
         <SearchBar value={searchQuery} onChange={(v) => { setSearchQuery(v); pagination.resetPage(); }} placeholder="Search masters..." />
         <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-          {filteredData.length} of {data.length} records
+          {tabValue === 5 ? `${itemsPageData.length} of ${itemsTotalCount}` : 
+           tabValue === 6 ? `${customersPageData.length} of ${customersTotalCount}` :
+           tabValue === 7 ? `${suppliersPageData.length} of ${suppliersTotalCount}` :
+           `${filteredData.length} of ${data.length}`} records
         </Typography>
       </Box>
 
       {/* Data Table */}
       <Card>
         <TableContainer sx={{ maxHeight: 500 }}>
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 5 }}><CircularProgress /></Box>
-          ) : (
+          {false ? null : (
             <Table stickyHeader size="small">
               <TableHead>
                 <TableRow>
@@ -459,16 +728,47 @@ export default function Masters() {
                   {tabValue === 5 && (
                     <>
                       <TableCell sx={{ fontWeight: 600 }}>Item ID</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Code</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Category/Brand</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Barcode</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>UOM</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Item Code</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Alias</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>HSN Code</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Item Group</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Alt Sale Price</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Alt Purch Price</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>MRP</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Sale Discount</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Main Unit</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Alt Unit</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Weight / Vol</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Tracking</TableCell>
                     </>
                   )}
                   {tabValue === 6 && (
+                    <>
+                      <TableCell sx={{ fontWeight: 600 }}>Customer ID</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Customer Code</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Mobile</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Email</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>GST No</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Station / City</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>State</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Pincode</TableCell>
+                    </>
+                  )}
+                  {tabValue === 7 && (
+                    <>
+                      <TableCell sx={{ fontWeight: 600 }}>Supplier ID</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Supplier Code</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Mobile</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Email</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>GST No</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Station / City</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>State</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Pincode</TableCell>
+                    </>
+                  )}
+                  {tabValue === 8 && (
                     <>
                       <TableCell sx={{ fontWeight: 600 }}>User ID</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Username</TableCell>
@@ -478,7 +778,7 @@ export default function Masters() {
                       <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
                     </>
                   )}
-                  {tabValue === 7 && (
+                  {tabValue === 9 && (
                     <>
                       <TableCell sx={{ fontWeight: 600 }}>Aisle ID</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Warehouse / Zone</TableCell>
@@ -491,160 +791,310 @@ export default function Masters() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paginatedData.map((row: any, idx: number) => (
-                  <TableRow key={idx} hover>
-                    {tabValue === 0 && (
-                      <>
-                        <TableCell>{row.WarehouseId}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
-                        <TableCell>{row.Name}</TableCell>
-                        <TableCell>{row.Address}</TableCell>
-                        <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
-                      </>
-                    )}
-                    {tabValue === 1 && (
-                      <>
-                        <TableCell>{row.ZoneId}</TableCell>
-                        <TableCell>{row.WarehouseName}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
-                        <TableCell>{row.Name}</TableCell>
-                        <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
-                      </>
-                    )}
-                    {tabValue === 2 && (
-                      <>
-                        <TableCell>{row.RackId}</TableCell>
-                        <TableCell>{row.WarehouseName} / {row.ZoneName}{row.AisleCode ? ` / Aisle ${row.AisleCode}` : ''}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
-                        <TableCell>{row.Name}</TableCell>
-                        <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
-                      </>
-                    )}
-                    {tabValue === 3 && (
-                      <>
-                        <TableCell>{row.ShelfId}</TableCell>
-                        <TableCell>{row.ZoneCode} / {row.RackName || `Rack ID: ${row.RackId}`}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
-                        <TableCell>{row.Name}</TableCell>
-                        <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
-                      </>
-                    )}
-                    {tabValue === 4 && (
-                      <>
-                        <TableCell>{row.BinId}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
-                        <TableCell><code>{row.Barcode}</code></TableCell>
-                        <TableCell>{row.CapacityWeight}kg / {row.CapacityVolume}L</TableCell>
-                        <TableCell>{row.OccupiedWeight}kg / {row.OccupiedVolume}L</TableCell>
-                        <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
-                      </>
-                    )}
-                    {tabValue === 5 && (
-                      <>
+                {tabValue === 5 ? (
+                  itemsLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={15} align="center" sx={{ py: 5 }}>
+                        <CircularProgress size={24} />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    itemsPageData.map((row: any) => (
+                      <TableRow key={row.ItemId} hover>
                         <TableCell>{row.ItemId}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
-                        <TableCell>{row.Name}</TableCell>
-                        <TableCell>{row.Category} / {row.Brand}</TableCell>
-                        <TableCell><code>{row.Barcode || 'N/A'}</code></TableCell>
-                        <TableCell>{row.UOM}</TableCell>
-                        <TableCell>{row.Weight || 0}kg / {row.Volume || 0}L</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>{row.Name}</TableCell>
+                        <TableCell><code>{row.Code}</code></TableCell>
+                        <TableCell>{row.Alias || 'N/A'}</TableCell>
+                        <TableCell>{row.HSNCode || 'N/A'}</TableCell>
+                        <TableCell>{row.Category || 'General'}</TableCell>
+                        <TableCell>₹{parseFloat(row.AltSalePrice || 0).toFixed(2)}</TableCell>
+                        <TableCell>₹{parseFloat(row.AltPurchPrice || 0).toFixed(2)}</TableCell>
+                        <TableCell>₹{parseFloat(row.MRP || 0).toFixed(2)}</TableCell>
+                        <TableCell>{parseFloat(row.SaleDiscount || 0).toFixed(2)}%</TableCell>
+                        <TableCell>{row.MainUnit || 'N/A'}</TableCell>
+                        <TableCell>{row.AltUnit || 'N/A'}</TableCell>
+                        <TableCell>{parseFloat(row.Weight || 0).toFixed(4)}kg / {parseFloat(row.Volume || 0).toFixed(4)}L</TableCell>
                         <TableCell>
-                          {row.TrackBatch ? 'Batch ' : ''}
-                          {row.TrackSerial ? 'Serial' : ''}
-                          {!row.TrackBatch && !row.TrackSerial ? 'Standard' : ''}
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Button 
+                              size="small" 
+                              variant="outlined" 
+                              startIcon={<Printer size={14} />}
+                              onClick={() => handlePrintBarcodeClick(row)}
+                            >
+                              Print
+                            </Button>
+                            {canUpdate && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                onClick={() => handleEditClick(row, 'item')}
+                              >
+                                Edit
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                color="error" 
+                                onClick={() => handleDeleteClick(row.ItemId, 'item')}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </Box>
                         </TableCell>
-                      </>
-                    )}
-                    {tabValue === 6 && (
-                      <>
-                        <TableCell>{row.UserId}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{row.Username}</TableCell>
-                        <TableCell>{row.FullName}</TableCell>
-                        <TableCell>{row.Email}</TableCell>
-                        <TableCell><Typography variant="caption" sx={{ fontWeight: 700, bgcolor: 'secondary.light', px: 1, py: 0.5, borderRadius: 1 }}>{row.RoleName}</Typography></TableCell>
-                        <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
-                      </>
-                    )}
-                    {tabValue === 7 && (
-                      <>
-                        <TableCell>{row.AisleId}</TableCell>
-                        <TableCell>{row.WarehouseName} / {row.ZoneName}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
-                        <TableCell>{row.Name}</TableCell>
-                        <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
-                      </>
-                    )}
-                    <TableCell>
-                      <Box sx={{ display: 'flex', gap: 1 }}>
+                      </TableRow>
+                    ))
+                  )
+                ) : tabValue === 6 ? (
+                  customersLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={10} align="center" sx={{ py: 5 }}>
+                        <CircularProgress size={24} />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    customersPageData.map((row: any) => (
+                      <TableRow key={row.CustomerId} hover>
+                        <TableCell>{row.CustomerId}</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>{row.Name}</TableCell>
+                        <TableCell><code>{row.Code}</code></TableCell>
+                        <TableCell>{row.Mobile || 'N/A'}</TableCell>
+                        <TableCell>{row.Email || 'N/A'}</TableCell>
+                        <TableCell><code>{row.GSTIN || 'N/A'}</code></TableCell>
+                        <TableCell>{row.Station || 'N/A'}</TableCell>
+                        <TableCell>{row.State || 'N/A'}</TableCell>
+                        <TableCell>{row.Pincode || 'N/A'}</TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            {canUpdate && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                onClick={() => handleEditClick(row, 'customer')}
+                              >
+                                Edit
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                color="error" 
+                                onClick={() => handleDeleteClick(row.CustomerId, 'customer')}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )
+                ) : tabValue === 7 ? (
+                  suppliersLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={10} align="center" sx={{ py: 5 }}>
+                        <CircularProgress size={24} />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    suppliersPageData.map((row: any) => (
+                      <TableRow key={row.SupplierId} hover>
+                        <TableCell>{row.SupplierId}</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>{row.Name}</TableCell>
+                        <TableCell><code>{row.Code}</code></TableCell>
+                        <TableCell>{row.Mobile || 'N/A'}</TableCell>
+                        <TableCell>{row.Email || 'N/A'}</TableCell>
+                        <TableCell><code>{row.GSTIN || 'N/A'}</code></TableCell>
+                        <TableCell>{row.Station || 'N/A'}</TableCell>
+                        <TableCell>{row.State || 'N/A'}</TableCell>
+                        <TableCell>{row.Pincode || 'N/A'}</TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            {canUpdate && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                onClick={() => handleEditClick(row, 'supplier')}
+                              >
+                                Edit
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                color="error" 
+                                onClick={() => handleDeleteClick(row.SupplierId, 'supplier')}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )
+                ) : (
+                  loading ? (
+                    <TableRow>
+                      <TableCell colSpan={8} align="center" sx={{ py: 5 }}>
+                        <CircularProgress size={24} />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    paginatedData.map((row: any) => (
+                      <TableRow key={
+                        tabValue === 0 ? row.WarehouseId :
+                        tabValue === 1 ? row.ZoneId :
+                        tabValue === 2 ? row.RackId :
+                        tabValue === 3 ? row.ShelfId :
+                        tabValue === 4 ? row.BinId :
+                        tabValue === 8 ? row.UserId : row.AisleId
+                      } hover>
+                        {tabValue === 0 && (
+                          <>
+                            <TableCell>{row.WarehouseId}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
+                            <TableCell>{row.Name}</TableCell>
+                            <TableCell>{row.Address || 'N/A'}</TableCell>
+                            <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
+                          </>
+                        )}
+                        {tabValue === 1 && (
+                          <>
+                            <TableCell>{row.ZoneId}</TableCell>
+                            <TableCell>{row.WarehouseName}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
+                            <TableCell>{row.Name}</TableCell>
+                            <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
+                          </>
+                        )}
+                        {tabValue === 2 && (
+                          <>
+                            <TableCell>{row.RackId}</TableCell>
+                            <TableCell>{row.WarehouseName} / {row.ZoneName}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
+                            <TableCell>{row.Name}</TableCell>
+                            <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
+                          </>
+                        )}
+                        {tabValue === 3 && (
+                          <>
+                            <TableCell>{row.ShelfId}</TableCell>
+                            <TableCell>{row.ZoneName} / {row.RackName}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
+                            <TableCell>{row.Name}</TableCell>
+                            <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
+                          </>
+                        )}
                         {tabValue === 4 && (
-                          <Button 
-                            size="small" 
-                            variant="outlined" 
-                            startIcon={<Printer size={14} />}
-                            onClick={() => handlePrintBinBarcodeClick(row)}
-                          >
-                            Print
-                          </Button>
+                          <>
+                            <TableCell>{row.BinId}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
+                            <TableCell><code>{row.Barcode || 'N/A'}</code></TableCell>
+                            <TableCell>{row.CapacityWeight}kg / {row.CapacityVolume}L</TableCell>
+                            <TableCell>{row.OccupiedWeight}kg / {row.OccupiedVolume}L</TableCell>
+                            <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
+                          </>
                         )}
-                        {tabValue === 5 && (
-                          <Button 
-                            size="small" 
-                            variant="outlined" 
-                            startIcon={<Printer size={14} />}
-                            onClick={() => handlePrintBarcodeClick(row)}
-                          >
-                            Print
-                          </Button>
+                        {tabValue === 8 && (
+                          <>
+                            <TableCell>{row.UserId}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.Username}</TableCell>
+                            <TableCell>{row.FullName}</TableCell>
+                            <TableCell>{row.Email}</TableCell>
+                            <TableCell><Typography variant="caption" sx={{ fontWeight: 700, bgcolor: 'secondary.light', px: 1, py: 0.5, borderRadius: 1 }}>{row.RoleName}</Typography></TableCell>
+                            <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
+                          </>
                         )}
-                        {canUpdate && (
-                          <Button 
-                            size="small" 
-                            variant="outlined" 
-                            onClick={() => handleEditClick(row, 
-                              tabValue === 0 ? 'warehouse' :
-                              tabValue === 1 ? 'zone' :
-                              tabValue === 2 ? 'rack' :
-                              tabValue === 3 ? 'shelf' :
-                              tabValue === 4 ? 'bin' :
-                              tabValue === 5 ? 'item' : 
-                              tabValue === 6 ? 'user' : 'aisle'
+                        {tabValue === 9 && (
+                          <>
+                            <TableCell>{row.AisleId}</TableCell>
+                            <TableCell>{row.WarehouseName} / {row.ZoneName}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
+                            <TableCell>{row.Name}</TableCell>
+                            <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
+                          </>
+                        )}
+                        <TableCell>
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            {tabValue === 4 && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                startIcon={<Printer size={14} />}
+                                onClick={() => handlePrintBinBarcodeClick(row)}
+                              >
+                                Print
+                              </Button>
                             )}
-                          >
-                            Edit
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <Button 
-                            size="small" 
-                            variant="outlined" 
-                            color="error" 
-                            onClick={() => handleDeleteClick(
-                              tabValue === 0 ? row.WarehouseId :
-                              tabValue === 1 ? row.ZoneId :
-                              tabValue === 2 ? row.RackId :
-                              tabValue === 3 ? row.ShelfId :
-                              tabValue === 4 ? row.BinId :
-                              tabValue === 5 ? row.ItemId :
-                              tabValue === 6 ? row.UserId : row.AisleId,
-                              tabValue === 0 ? 'warehouse' :
-                              tabValue === 1 ? 'zone' :
-                              tabValue === 2 ? 'rack' :
-                              tabValue === 3 ? 'shelf' :
-                              tabValue === 4 ? 'bin' :
-                              tabValue === 5 ? 'item' :
-                              tabValue === 6 ? 'user' : 'aisle'
+                            {canUpdate && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                onClick={() => handleEditClick(
+                                  tabValue === 0 ? row.WarehouseId :
+                                  tabValue === 1 ? row.ZoneId :
+                                  tabValue === 2 ? row.RackId :
+                                  tabValue === 3 ? row.ShelfId :
+                                  tabValue === 4 ? row.BinId :
+                                  tabValue === 8 ? row.UserId : row.AisleId,
+                                  tabValue === 0 ? 'warehouse' :
+                                  tabValue === 1 ? 'zone' :
+                                  tabValue === 2 ? 'rack' :
+                                  tabValue === 3 ? 'shelf' :
+                                  tabValue === 4 ? 'bin' :
+                                  tabValue === 8 ? 'user' : 'aisle'
+                                )}
+                              >
+                                Edit
+                              </Button>
                             )}
-                          >
-                            Delete
-                          </Button>
-                        )}
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {filteredData.length === 0 && (
+                            {canDelete && (
+                              <Button 
+                                size="small" 
+                                variant="outlined" 
+                                color="error" 
+                                onClick={() => handleDeleteClick(
+                                  tabValue === 0 ? row.WarehouseId :
+                                  tabValue === 1 ? row.ZoneId :
+                                  tabValue === 2 ? row.RackId :
+                                  tabValue === 3 ? row.ShelfId :
+                                  tabValue === 4 ? row.BinId :
+                                  tabValue === 8 ? row.UserId : row.AisleId,
+                                  tabValue === 0 ? 'warehouse' :
+                                  tabValue === 1 ? 'zone' :
+                                  tabValue === 2 ? 'rack' :
+                                  tabValue === 3 ? 'shelf' :
+                                  tabValue === 4 ? 'bin' :
+                                  tabValue === 8 ? 'user' : 'aisle'
+                                )}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )
+                )}
+                {(!itemsLoading && !customersLoading && !suppliersLoading && !loading && 
+                  (tabValue === 5 ? itemsPageData : 
+                   tabValue === 6 ? customersPageData : 
+                   tabValue === 7 ? suppliersPageData : 
+                   filteredData).length === 0) && (
                   <TableRow>
-                    <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                    <TableCell colSpan={
+                      tabValue === 5 ? 15 : 
+                      tabValue === 6 ? 10 : 
+                      tabValue === 7 ? 10 : 
+                      8
+                    } align="center" sx={{ py: 3 }}>
                       No records match your filters/search.
                     </TableCell>
                   </TableRow>
@@ -654,13 +1104,57 @@ export default function Masters() {
           )}
         </TableContainer>
         <TablePaginationBar
-          count={filteredData.length}
+          count={
+            tabValue === 5 ? itemsTotalCount : 
+            tabValue === 6 ? customersTotalCount : 
+            tabValue === 7 ? suppliersTotalCount : 
+            filteredData.length
+          }
           page={pagination.page}
           rowsPerPage={pagination.rowsPerPage}
           onPageChange={pagination.setPage}
           onRowsPerPageChange={pagination.setRowsPerPage}
         />
       </Card>
+
+      {/* Synchronization Backdrop Loader */}
+      <Dialog open={syncingItems} disableEscapeKeyDown PaperProps={{ sx: { p: 3, textAlign: 'center', maxWidth: 360 } }}>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, py: 2 }}>
+            <CircularProgress size={48} color="secondary" />
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>Syncing ERP Items</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Synchronizing 50,000+ items from Busy accounting ERP database... Please wait, this may take a moment.
+            </Typography>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customers Synchronization Backdrop Loader */}
+      <Dialog open={syncingCustomers} disableEscapeKeyDown PaperProps={{ sx: { p: 3, textAlign: 'center', maxWidth: 360 } }}>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, py: 2 }}>
+            <CircularProgress size={48} color="secondary" />
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>Syncing Customers</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Synchronizing Customer Masters from Busy accounting ERP database... Please wait.
+            </Typography>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* Suppliers Synchronization Backdrop Loader */}
+      <Dialog open={syncingSuppliers} disableEscapeKeyDown PaperProps={{ sx: { p: 3, textAlign: 'center', maxWidth: 360 } }}>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, py: 2 }}>
+            <CircularProgress size={48} color="secondary" />
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>Syncing Suppliers</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Synchronizing Supplier Masters from Busy accounting ERP database... Please wait.
+            </Typography>
+          </Box>
+        </DialogContent>
+      </Dialog>
 
       {/* Creation Modal */}
       <Dialog open={openModal} onClose={handleCloseModal} fullWidth maxWidth="sm">
@@ -776,6 +1270,27 @@ export default function Masters() {
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <FormControlLabel control={<Switch name="trackBatch" checked={!!formData.trackBatch} onChange={handleSwitchChange} />} label="Track Batch" />
                 <FormControlLabel control={<Switch name="trackSerial" checked={!!formData.trackSerial} onChange={handleSwitchChange} />} label="Track Serial No" />
+              </Box>
+            </>
+          )}
+
+          {(modalType === 'customer' || modalType === 'supplier') && (
+            <>
+              <TextField label="Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} />
+              <TextField label="GSTIN" name="gstin" value={formData.gstin || ''} fullWidth size="small" onChange={handleInputChange} />
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField label="Mobile" name="mobile" value={formData.mobile || ''} fullWidth size="small" onChange={handleInputChange} />
+                <TextField label="Email" name="email" value={formData.email || ''} type="email" fullWidth size="small" onChange={handleInputChange} />
+              </Box>
+              <TextField label="Address Line 1" name="add1" value={formData.add1 || ''} fullWidth size="small" onChange={handleInputChange} />
+              <TextField label="Address Line 2" name="add2" value={formData.add2 || ''} fullWidth size="small" onChange={handleInputChange} />
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField label="Station / City" name="station" value={formData.station || ''} fullWidth size="small" onChange={handleInputChange} />
+                <TextField label="State" name="state" value={formData.state || ''} fullWidth size="small" onChange={handleInputChange} />
+              </Box>
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <TextField label="Pincode" name="pincode" value={formData.pincode || ''} fullWidth size="small" onChange={handleInputChange} />
+                <TextField label="Country" name="country" value={formData.country || ''} fullWidth size="small" onChange={handleInputChange} />
               </Box>
             </>
           )}

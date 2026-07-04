@@ -362,12 +362,12 @@ export default function SyncSO() {
           <Button 
             variant="outlined" 
             color="primary" 
-            startIcon={<RefreshCw className={syncing ? 'animate-spin' : ''} size={16} />}
+            startIcon={syncing ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />}
             onClick={triggerSync}
             disabled={syncing}
             sx={{ fontWeight: 600 }}
           >
-            {syncing ? 'Syncing ERP...' : 'Pull ERP SOs'}
+            {syncing ? 'Syncing...' : 'Pull ERP SOs'}
           </Button>
         </Box>
       </Box>
@@ -515,6 +515,19 @@ export default function SyncSO() {
         <DialogActions>
           <Button onClick={() => setActiveSO(null)}>Close</Button>
         </DialogActions>
+      </Dialog>
+
+      {/* Synchronization Backdrop Loader */}
+      <Dialog open={syncing} disableEscapeKeyDown PaperProps={{ sx: { p: 3, textAlign: 'center', maxWidth: 360 } }}>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, py: 2 }}>
+            <CircularProgress size={48} color="primary" />
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>Pulling ERP SOs</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Synchronizing pending Sales Orders from Busy accounting ERP database... Please wait.
+            </Typography>
+          </Box>
+        </DialogContent>
       </Dialog>
 
       {/* Manual Entry / Edit Dialog */}

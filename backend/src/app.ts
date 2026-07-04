@@ -124,7 +124,14 @@ app.get('/api/masters/users', authenticateJWT, requireRoles(['Admin', 'Warehouse
 app.put('/api/masters/users/:id', authenticateJWT, requireRoles(['Admin', 'Warehouse Manager']), MasterController.updateUser);
 app.delete('/api/masters/users/:id', authenticateJWT, requireRoles(['Admin']), MasterController.deleteUser);
 app.get('/api/masters/suppliers', authenticateJWT, requirePermission('Masters', 'read'), MasterController.getSuppliers);
+app.post('/api/masters/suppliers', authenticateJWT, requirePermission('Masters', 'create'), MasterController.createSupplier);
+app.put('/api/masters/suppliers/:id', authenticateJWT, requirePermission('Masters', 'update'), MasterController.updateSupplier);
+app.delete('/api/masters/suppliers/:id', authenticateJWT, requirePermission('Masters', 'delete'), MasterController.deleteSupplier);
+
 app.get('/api/masters/customers', authenticateJWT, requirePermission('Masters', 'read'), MasterController.getCustomers);
+app.post('/api/masters/customers', authenticateJWT, requirePermission('Masters', 'create'), MasterController.createCustomer);
+app.put('/api/masters/customers/:id', authenticateJWT, requirePermission('Masters', 'update'), MasterController.updateCustomer);
+app.delete('/api/masters/customers/:id', authenticateJWT, requirePermission('Masters', 'delete'), MasterController.deleteCustomer);
 
 // Inbound Operations
 app.get('/api/inbound/pending-pos', authenticateJWT, requirePermission('Inbound', 'read'), GrnController.getPendingPOs);
@@ -265,9 +272,10 @@ app.delete('/api/transactions/:type/:id', authenticateJWT, ReportController.dele
 
 
 // ==========================================
-// SWAGGER DOCS SETUP
-// ==========================================
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+app.get('/api-docs-json', (req, res) => {
+  res.json(swaggerDocument);
+});
 
 // Global Error Handler
 app.use((err: any, req: any, res: any, next: any) => {

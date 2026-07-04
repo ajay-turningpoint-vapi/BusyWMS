@@ -121,38 +121,58 @@ export class MasterController {
     try {
       const page = parseInt(req.query.page as string || '0', 10);
       const limit = parseInt(req.query.limit as string || '50', 10);
+      const search = (req.query.search as string || '').trim();
       const inBinsOnly = req.query.inBinsOnly === 'true';
-      
-      let rows;
-      if (inBinsOnly) {
-        if (req.query.page && req.query.limit) {
-          const offset = page * limit;
-          rows = await db.query(`
-            SELECT DISTINCT i.* 
-            FROM tblItem i
-            INNER JOIN tblInventory inv ON i.ItemId = inv.ItemId
-            WHERE inv.Quantity > 0
-            ORDER BY i.ItemId DESC 
-            LIMIT @limit OFFSET @offset
-          `, { limit, offset });
-        } else {
-          rows = await db.query(`
-            SELECT DISTINCT i.* 
-            FROM tblItem i
-            INNER JOIN tblInventory inv ON i.ItemId = inv.ItemId
-            WHERE inv.Quantity > 0
-            ORDER BY i.ItemId DESC
-          `);
-        }
-      } else {
-        if (req.query.page && req.query.limit) {
-          const offset = page * limit;
-          rows = await db.query('SELECT * FROM tblItem ORDER BY ItemId DESC LIMIT @limit OFFSET @offset', { limit, offset });
-        } else {
-          rows = await db.query('SELECT * FROM tblItem ORDER BY ItemId DESC');
-        }
+
+      let whereClause = 'WHERE 1=1';
+      const params: Record<string, any> = {};
+
+      if (search) {
+        whereClause += ' AND (i.Name LIKE @searchPattern OR i.Code LIKE @searchPattern OR i.Alias LIKE @searchPattern OR i.HSNCode LIKE @searchPattern OR i.Category LIKE @searchPattern)';
+        params.searchPattern = `%${search}%`;
       }
-      return res.json(rows);
+
+      let fromClause = 'tblItem i';
+      if (inBinsOnly) {
+        fromClause += ' INNER JOIN tblInventory inv ON i.ItemId = inv.ItemId';
+        whereClause += ' AND inv.Quantity > 0';
+      }
+
+      // Check if paginated or full list requested
+      const isPaginated = req.query.page !== undefined;
+
+      if (isPaginated) {
+        const offset = page * limit;
+        params.limit = limit;
+        params.offset = offset;
+
+        // Query total
+        const countQuery = `SELECT COUNT(DISTINCT i.ItemId) AS total FROM ${fromClause} ${whereClause}`;
+        const countRows = await db.query(countQuery, params);
+        const total = countRows.length > 0 ? countRows[0].total : 0;
+
+        // Query paginated items
+        const selectQuery = `
+          SELECT DISTINCT i.* 
+          FROM ${fromClause} 
+          ${whereClause} 
+          ORDER BY i.ItemId DESC 
+          LIMIT @limit OFFSET @offset
+        `;
+        const items = await db.query(selectQuery, params);
+
+        return res.json({ items, total });
+      } else {
+        // Query full list
+        const selectQuery = `
+          SELECT DISTINCT i.* 
+          FROM ${fromClause} 
+          ${whereClause} 
+          ORDER BY i.ItemId DESC
+        `;
+        const items = await db.query(selectQuery, params);
+        return res.json(items);
+      }
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -694,8 +714,53 @@ export class MasterController {
   
   public static async getSuppliers(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query('SELECT * FROM tblSupplier ORDER BY Name ASC');
-      return res.json(rows);
+      const page = parseInt(req.query.page as string || '0', 10);
+      const limit = parseInt(req.query.limit as string || '50', 10);
+      const search = (req.query.search as string || '').trim();
+
+      let whereClause = 'WHERE 1=1';
+      const params: Record<string, any> = {};
+
+      if (search) {
+        whereClause += ' AND (s.Name LIKE @searchPattern OR s.Code LIKE @searchPattern OR s.GSTIN LIKE @searchPattern OR s.Station LIKE @searchPattern OR s.State LIKE @searchPattern OR s.Mobile LIKE @searchPattern)';
+        params.searchPattern = `%${search}%`;
+      }
+
+      // Check if paginated or full list requested
+      const isPaginated = req.query.page !== undefined;
+
+      if (isPaginated) {
+        const offset = page * limit;
+        params.limit = limit;
+        params.offset = offset;
+
+        // Query total
+        const countQuery = `SELECT COUNT(SupplierId) AS total FROM tblSupplier s ${whereClause}`;
+        const countRows = await db.query(countQuery, params);
+        const total = countRows.length > 0 ? countRows[0].total : 0;
+
+        // Query paginated suppliers
+        const selectQuery = `
+          SELECT s.* 
+          FROM tblSupplier s 
+          ${whereClause} 
+          ORDER BY s.SupplierId DESC 
+          LIMIT @limit OFFSET @offset
+        `;
+        const items = await db.query(selectQuery, params);
+
+        return res.json({ items, total });
+      } else {
+        // Query full list
+        const selectQuery = `
+          SELECT s.* 
+          FROM tblSupplier s 
+          ${whereClause} 
+          ORDER BY s.Name ASC
+        `;
+        const items = await db.query(selectQuery, params);
+        return res.json(items);
+      }
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -703,8 +768,53 @@ export class MasterController {
 
   public static async getCustomers(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query('SELECT * FROM tblCustomer ORDER BY Name ASC');
-      return res.json(rows);
+      const page = parseInt(req.query.page as string || '0', 10);
+      const limit = parseInt(req.query.limit as string || '50', 10);
+      const search = (req.query.search as string || '').trim();
+
+      let whereClause = 'WHERE 1=1';
+      const params: Record<string, any> = {};
+
+      if (search) {
+        whereClause += ' AND (c.Name LIKE @searchPattern OR c.Code LIKE @searchPattern OR c.GSTIN LIKE @searchPattern OR c.Station LIKE @searchPattern OR c.State LIKE @searchPattern OR c.Mobile LIKE @searchPattern)';
+        params.searchPattern = `%${search}%`;
+      }
+
+      // Check if paginated or full list requested
+      const isPaginated = req.query.page !== undefined;
+
+      if (isPaginated) {
+        const offset = page * limit;
+        params.limit = limit;
+        params.offset = offset;
+
+        // Query total
+        const countQuery = `SELECT COUNT(CustomerId) AS total FROM tblCustomer c ${whereClause}`;
+        const countRows = await db.query(countQuery, params);
+        const total = countRows.length > 0 ? countRows[0].total : 0;
+
+        // Query paginated customers
+        const selectQuery = `
+          SELECT c.* 
+          FROM tblCustomer c 
+          ${whereClause} 
+          ORDER BY c.CustomerId DESC 
+          LIMIT @limit OFFSET @offset
+        `;
+        const items = await db.query(selectQuery, params);
+
+        return res.json({ items, total });
+      } else {
+        // Query full list
+        const selectQuery = `
+          SELECT c.* 
+          FROM tblCustomer c 
+          ${whereClause} 
+          ORDER BY c.Name ASC
+        `;
+        const items = await db.query(selectQuery, params);
+        return res.json(items);
+      }
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -773,6 +883,92 @@ export class MasterController {
         return res.status(404).json({ message: 'Aisle not found' });
       }
       return res.json({ message: 'Aisle deleted successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  // CUSTOMER CRUD
+  public static async createCustomer(req: AuthenticatedRequest, res: Response) {
+    const { code, name, parentGrp, alias, mobile, email, add1, add2, add3, add4, gstin, station, country, pincode, state } = req.body;
+    if (!code || !name) return res.status(400).json({ message: 'Code and Name are required' });
+    try {
+      await db.executeCmd(`
+        INSERT INTO tblCustomer (Code, Name, ParentGrp, Alias, Mobile, Email, Add1, Add2, Add3, Add4, GSTIN, Station, Country, Pincode, State, IsActive)
+        VALUES (@code, @name, @parentGrp, @alias, @mobile, @email, @add1, @add2, @add3, @add4, @gstin, @station, @country, @pincode, @state, 1)
+      `, { code, name, parentGrp, alias, mobile, email, add1, add2, add3, add4, gstin, station, country, pincode, state });
+      return res.status(201).json({ message: 'Customer created successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async updateCustomer(req: AuthenticatedRequest, res: Response) {
+    const { id } = req.params;
+    const { name, parentGrp, alias, mobile, email, add1, add2, add3, add4, gstin, station, country, pincode, state, isActive } = req.body;
+    try {
+      await db.executeCmd(`
+        UPDATE tblCustomer 
+        SET Name = @name, ParentGrp = @parentGrp, Alias = @alias, Mobile = @mobile, Email = @email,
+            Add1 = @add1, Add2 = @add2, Add3 = @add3, Add4 = @add4, GSTIN = @gstin,
+            Station = @station, Country = @country, Pincode = @pincode, State = @state,
+            IsActive = @isActive
+        WHERE CustomerId = @id
+      `, { id, name, parentGrp, alias, mobile, email, add1, add2, add3, add4, gstin, station, country, pincode, state, isActive: isActive ? 1 : 0 });
+      return res.json({ message: 'Customer updated successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async deleteCustomer(req: AuthenticatedRequest, res: Response) {
+    const { id } = req.params;
+    try {
+      await db.executeCmd('DELETE FROM tblCustomer WHERE CustomerId = @id', { id });
+      return res.json({ message: 'Customer deleted successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  // SUPPLIER CRUD
+  public static async createSupplier(req: AuthenticatedRequest, res: Response) {
+    const { code, name, parentGrp, alias, mobile, email, add1, add2, add3, add4, gstin, station, country, pincode, state } = req.body;
+    if (!code || !name) return res.status(400).json({ message: 'Code and Name are required' });
+    try {
+      await db.executeCmd(`
+        INSERT INTO tblSupplier (Code, Name, ParentGrp, Alias, Mobile, Email, Add1, Add2, Add3, Add4, GSTIN, Station, Country, Pincode, State, IsActive)
+        VALUES (@code, @name, @parentGrp, @alias, @mobile, @email, @add1, @add2, @add3, @add4, @gstin, @station, @country, @pincode, @state, 1)
+      `, { code, name, parentGrp, alias, mobile, email, add1, add2, add3, add4, gstin, station, country, pincode, state });
+      return res.status(201).json({ message: 'Supplier created successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async updateSupplier(req: AuthenticatedRequest, res: Response) {
+    const { id } = req.params;
+    const { name, parentGrp, alias, mobile, email, add1, add2, add3, add4, gstin, station, country, pincode, state, isActive } = req.body;
+    try {
+      await db.executeCmd(`
+        UPDATE tblSupplier 
+        SET Name = @name, ParentGrp = @parentGrp, Alias = @alias, Mobile = @mobile, Email = @email,
+            Add1 = @add1, Add2 = @add2, Add3 = @add3, Add4 = @add4, GSTIN = @gstin,
+            Station = @station, Country = @country, Pincode = @pincode, State = @state,
+            IsActive = @isActive
+        WHERE SupplierId = @id
+      `, { id, name, parentGrp, alias, mobile, email, add1, add2, add3, add4, gstin, station, country, pincode, state, isActive: isActive ? 1 : 0 });
+      return res.json({ message: 'Supplier updated successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async deleteSupplier(req: AuthenticatedRequest, res: Response) {
+    const { id } = req.params;
+    try {
+      await db.executeCmd('DELETE FROM tblSupplier WHERE SupplierId = @id', { id });
+      return res.json({ message: 'Supplier deleted successfully' });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }

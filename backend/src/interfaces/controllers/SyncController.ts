@@ -21,43 +21,103 @@ export class SyncController {
   // ==========================================
 
   public static async syncSuppliers(req: AuthenticatedRequest, res: Response) {
-    const mockErpSuppliers = [
-      { Code: 'VND-003', Name: 'Lenovo India Pvt Ltd', Address: 'Electronic City, Bangalore', GSTIN: '29AAAAK5678C3Z3' },
-      { Code: 'VND-004', Name: 'Crucial Technology Corp', Address: 'Silicon Valley, California', GSTIN: '99AAAAC8888D4Z4' },
-      { Code: 'VND-005', Name: 'HP Enterprise Solutions', Address: 'Cyber City, Gurgaon', GSTIN: '06AAAAH9999E5Z5' },
-      { Code: 'VND-006', Name: 'Asus Tek Computer Inc', Address: 'Taipei, Taiwan', GSTIN: '99ASUS12345A1Z2' }
-    ];
-
     try {
+      const pool = mssqlDb.getPool();
+      const query = `
+        SELECT
+          M.CODE AS CODE, 
+          M.NAME AS NAME, 
+          (SELECT P.NAME FROM MASTER1 P WHERE P.MASTERTYPE = 1 AND P.CODE = M.PARENTGRP) AS PARENT_GRP,
+          M.ALIAS AS ALIAS,
+          A.MOBILE,
+          A.EMAIL,
+          A.address1 AS ADD1, 
+          A.address2 AS ADD2, A.address3 AS ADD3, A.address4 AS ADD4, 
+          A.GSTNo AS GST_No,
+          A.STATION AS STATION,
+          (select name from master1 m1 where m1.code=A.CountryCodeLong) as country,
+          A.PINCODE AS PINCODE,
+          (select name from master1 m1 where m1.code=A.StateCodeLong) as state
+        FROM MASTER1 M 
+        LEFT JOIN MASTERADDRESSINFO A ON M.CODE = A.MASTERCODE 
+        WHERE M.MASTERTYPE = 2 
+        AND (SELECT P.NAME FROM MASTER1 P WHERE P.MASTERTYPE = 1 AND P.CODE = M.PARENTGRP) LIKE 'SUNDRY CREDITOR%' 
+        AND ISNULL(LTRIM(RTRIM(A.PINCODE)), '') <> '' 
+        AND ISNULL(LTRIM(RTRIM(A.STATION)), '') <> '' 
+        ORDER BY M.CODE
+      `;
+
+      console.log('Fetching suppliers from MSSQL ERP...');
+      const result = await pool.request().query(query);
+      const erpSuppliers = result.recordset;
+      console.log(`Fetched ${erpSuppliers.length} suppliers from MSSQL ERP.`);
+
+      // Batch insert into MariaDB
+      const chunkSize = 1000;
       let syncedCount = 0;
-      for (const supplier of mockErpSuppliers) {
-        // Upsert Supplier into tblSupplier
-        await db.executeCmd(`
-          INSERT INTO tblSupplier (Code, Name, Address, GSTIN)
-          VALUES (@code, @name, @address, @gstin)
-          ON DUPLICATE KEY UPDATE 
-            Name = @name, 
-            Address = @address, 
-            GSTIN = @gstin
-        `, {
-          code: supplier.Code,
-          name: supplier.Name,
-          address: supplier.Address,
-          gstin: supplier.GSTIN
-        });
-        syncedCount++;
+
+      for (let i = 0; i < erpSuppliers.length; i += chunkSize) {
+        const chunk = erpSuppliers.slice(i, i + chunkSize);
+        const values = chunk.map(row => {
+          const code = row.CODE ? String(row.CODE).trim() : '';
+          const name = row.NAME ? String(row.NAME).trim() : '';
+          const parentGrp = row.PARENT_GRP ? String(row.PARENT_GRP).trim() : null;
+          const alias = row.ALIAS ? String(row.ALIAS).trim() : null;
+          const mobile = row.MOBILE ? String(row.MOBILE).trim() : null;
+          const email = row.EMAIL ? String(row.EMAIL).trim() : null;
+          const add1 = row.ADD1 ? String(row.ADD1).trim() : null;
+          const add2 = row.ADD2 ? String(row.ADD2).trim() : null;
+          const add3 = row.ADD3 ? String(row.ADD3).trim() : null;
+          const add4 = row.ADD4 ? String(row.ADD4).trim() : null;
+          const gstin = row.GST_No ? String(row.GST_No).trim() : null;
+          const station = row.STATION ? String(row.STATION).trim() : null;
+          const country = row.country ? String(row.country).trim() : null;
+          const pincode = row.PINCODE ? String(row.PINCODE).trim() : null;
+          const state = row.state ? String(row.state).trim() : null;
+
+          return [
+            code, name, parentGrp, alias, mobile, email,
+            add1, add2, add3, add4, gstin, station, country, pincode, state, 1
+          ];
+        }).filter(item => item[0] !== '' && item[1] !== '');
+
+        if (values.length > 0) {
+          await db.query(`
+            INSERT INTO tblSupplier (
+              Code, Name, ParentGrp, Alias, Mobile, Email,
+              Add1, Add2, Add3, Add4, GSTIN, Station, Country, Pincode, State, IsActive
+            )
+            VALUES @values
+            ON DUPLICATE KEY UPDATE
+              Name = VALUES(Name),
+              ParentGrp = VALUES(ParentGrp),
+              Alias = VALUES(Alias),
+              Mobile = VALUES(Mobile),
+              Email = VALUES(Email),
+              Add1 = VALUES(Add1),
+              Add2 = VALUES(Add2),
+              Add3 = VALUES(Add3),
+              Add4 = VALUES(Add4),
+              GSTIN = VALUES(GSTIN),
+              Station = VALUES(Station),
+              Country = VALUES(Country),
+              Pincode = VALUES(Pincode),
+              State = VALUES(State)
+          `, { values });
+          syncedCount += values.length;
+        }
       }
 
       await db.executeCmd(`
         INSERT INTO tblApiLog (SyncType, Direction, Endpoint, RequestPayload, ResponsePayload, Status)
-        VALUES ('SUPPLIER_SYNC', 'INBOUND', '/sync/suppliers', @req, @res, 'SUCCESS')
+        VALUES ('SUPPLIER_SYNC', 'INBOUND', '/sync/suppliers', '{}', @res, 'SUCCESS')
       `, { 
-        req: JSON.stringify(mockErpSuppliers), 
         res: JSON.stringify({ message: 'Sync successful', syncedCount }) 
       });
 
       return res.json({ message: 'Supplier Masters synchronized successfully', count: syncedCount });
     } catch (err: any) {
+      console.error('Failed to sync suppliers from ERP:', err);
       await db.executeCmd(`
         INSERT INTO tblApiLog (SyncType, Direction, Endpoint, RequestPayload, ResponsePayload, Status, ErrorMessage)
         VALUES ('SUPPLIER_SYNC', 'INBOUND', '/sync/suppliers', '{}', '', 'ERROR', @err)
@@ -67,42 +127,103 @@ export class SyncController {
   }
 
   public static async syncCustomers(req: AuthenticatedRequest, res: Response) {
-    const mockErpCustomers = [
-      { Code: 'CST-003', Name: 'Croma Electronics', Address: 'Andheri East, Mumbai', GSTIN: '27AAAAC9999H3Z8' },
-      { Code: 'CST-004', Name: 'Reliance Digital', Address: 'Ghansoli, Navi Mumbai', GSTIN: '27AAAAR2222I4Z9' },
-      { Code: 'CST-005', Name: 'Vijay Sales Retail', Address: 'Mahim, Mumbai', GSTIN: '27VIJAY9876J2Z5' },
-      { Code: 'CST-006', Name: 'Croma Retail CP', Address: 'Connaught Place, Delhi', GSTIN: '07AAAAC9999H1Z0' }
-    ];
-
     try {
+      const pool = mssqlDb.getPool();
+      const query = `
+        SELECT
+          M.CODE AS CODE, 
+          M.NAME AS NAME, 
+          (SELECT P.NAME FROM MASTER1 P WHERE P.MASTERTYPE = 1 AND P.CODE = M.PARENTGRP) AS PARENT_GRP,
+          M.ALIAS AS ALIAS,
+          A.MOBILE,
+          A.EMAIL,
+          A.address1 AS ADD1, 
+          A.address2 AS ADD2, A.address3 AS ADD3, A.address4 AS ADD4, 
+          A.GSTNo AS GST_No,
+          A.STATION AS STATION,
+          (select name from master1 m1 where m1.code=A.CountryCodeLong) as country,
+          A.PINCODE AS PINCODE,
+          (select name from master1 m1 where m1.code=A.StateCodeLong) as state
+        FROM MASTER1 M 
+        LEFT JOIN MASTERADDRESSINFO A ON M.CODE = A.MASTERCODE 
+        WHERE M.MASTERTYPE = 2 
+        AND (SELECT P.NAME FROM MASTER1 P WHERE P.MASTERTYPE = 1 AND P.CODE = M.PARENTGRP) LIKE 'SUNDRY DEBTOR%' 
+        AND ISNULL(LTRIM(RTRIM(A.PINCODE)), '') <> '' 
+        AND ISNULL(LTRIM(RTRIM(A.STATION)), '') <> '' 
+        ORDER BY M.CODE
+      `;
+
+      console.log('Fetching customers from MSSQL ERP...');
+      const result = await pool.request().query(query);
+      const erpCustomers = result.recordset;
+      console.log(`Fetched ${erpCustomers.length} customers from MSSQL ERP.`);
+
+      // Batch insert into MariaDB
+      const chunkSize = 1000;
       let syncedCount = 0;
-      for (const customer of mockErpCustomers) {
-        await db.executeCmd(`
-          INSERT INTO tblCustomer (Code, Name, Address, GSTIN)
-          VALUES (@code, @name, @address, @gstin)
-          ON DUPLICATE KEY UPDATE 
-            Name = @name, 
-            Address = @address, 
-            GSTIN = @gstin
-        `, {
-          code: customer.Code,
-          name: customer.Name,
-          address: customer.Address,
-          gstin: customer.GSTIN
-        });
-        syncedCount++;
+
+      for (let i = 0; i < erpCustomers.length; i += chunkSize) {
+        const chunk = erpCustomers.slice(i, i + chunkSize);
+        const values = chunk.map(row => {
+          const code = row.CODE ? String(row.CODE).trim() : '';
+          const name = row.NAME ? String(row.NAME).trim() : '';
+          const parentGrp = row.PARENT_GRP ? String(row.PARENT_GRP).trim() : null;
+          const alias = row.ALIAS ? String(row.ALIAS).trim() : null;
+          const mobile = row.MOBILE ? String(row.MOBILE).trim() : null;
+          const email = row.EMAIL ? String(row.EMAIL).trim() : null;
+          const add1 = row.ADD1 ? String(row.ADD1).trim() : null;
+          const add2 = row.ADD2 ? String(row.ADD2).trim() : null;
+          const add3 = row.ADD3 ? String(row.ADD3).trim() : null;
+          const add4 = row.ADD4 ? String(row.ADD4).trim() : null;
+          const gstin = row.GST_No ? String(row.GST_No).trim() : null;
+          const station = row.STATION ? String(row.STATION).trim() : null;
+          const country = row.country ? String(row.country).trim() : null;
+          const pincode = row.PINCODE ? String(row.PINCODE).trim() : null;
+          const state = row.state ? String(row.state).trim() : null;
+
+          return [
+            code, name, parentGrp, alias, mobile, email,
+            add1, add2, add3, add4, gstin, station, country, pincode, state, 1
+          ];
+        }).filter(item => item[0] !== '' && item[1] !== '');
+
+        if (values.length > 0) {
+          await db.query(`
+            INSERT INTO tblCustomer (
+              Code, Name, ParentGrp, Alias, Mobile, Email,
+              Add1, Add2, Add3, Add4, GSTIN, Station, Country, Pincode, State, IsActive
+            )
+            VALUES @values
+            ON DUPLICATE KEY UPDATE
+              Name = VALUES(Name),
+              ParentGrp = VALUES(ParentGrp),
+              Alias = VALUES(Alias),
+              Mobile = VALUES(Mobile),
+              Email = VALUES(Email),
+              Add1 = VALUES(Add1),
+              Add2 = VALUES(Add2),
+              Add3 = VALUES(Add3),
+              Add4 = VALUES(Add4),
+              GSTIN = VALUES(GSTIN),
+              Station = VALUES(Station),
+              Country = VALUES(Country),
+              Pincode = VALUES(Pincode),
+              State = VALUES(State)
+          `, { values });
+          syncedCount += values.length;
+        }
       }
 
       await db.executeCmd(`
         INSERT INTO tblApiLog (SyncType, Direction, Endpoint, RequestPayload, ResponsePayload, Status)
-        VALUES ('CUSTOMER_SYNC', 'INBOUND', '/sync/customers', @req, @res, 'SUCCESS')
+        VALUES ('CUSTOMER_SYNC', 'INBOUND', '/sync/customers', '{}', @res, 'SUCCESS')
       `, { 
-        req: JSON.stringify(mockErpCustomers), 
         res: JSON.stringify({ message: 'Sync successful', syncedCount }) 
       });
 
       return res.json({ message: 'Customer Masters synchronized successfully', count: syncedCount });
     } catch (err: any) {
+      console.error('Failed to sync customers from ERP:', err);
       await db.executeCmd(`
         INSERT INTO tblApiLog (SyncType, Direction, Endpoint, RequestPayload, ResponsePayload, Status, ErrorMessage)
         VALUES ('CUSTOMER_SYNC', 'INBOUND', '/sync/customers', '{}', '', 'ERROR', @err)
@@ -112,57 +233,102 @@ export class SyncController {
   }
 
   public static async syncItems(req: AuthenticatedRequest, res: Response) {
-    const mockErpItems = [
-      { Code: 'ITM-001', Name: 'Logitech G102 Mouse', Description: 'Wired Gaming Mouse with RGB', Category: 'Peripherals', Brand: 'Logitech', UOM: 'PCS', Barcode: '8901012345671', HSNCode: '84716060', Weight: 0.1500, Volume: 0.3500, UnitCost: 600.00, SellingPrice: 850.00 },
-      { Code: 'ITM-002', Name: 'Dell KB216 Keyboard', Description: 'Standard Multimedia USB Keyboard', Category: 'Peripherals', Brand: 'Dell', UOM: 'PCS', Barcode: '8901012345672', HSNCode: '84716060', Weight: 0.4500, Volume: 1.2000, UnitCost: 480.00, SellingPrice: 700.00 },
-      { Code: 'ITM-003', Name: 'Crucial MX500 SSD 500GB', Description: 'SATA 2.5 Inch Internal Solid State Drive', Category: 'Storage', Brand: 'Crucial', UOM: 'PCS', Barcode: '8901012345673', HSNCode: '85235190', Weight: 0.0600, Volume: 0.1000, UnitCost: 3500.00, SellingPrice: 4800.00 },
-      { Code: 'ITM-006', Name: 'SanDisk Ultra Dual 64GB', Description: 'OTG USB 3.1 Flash Drive for Android', Category: 'Storage', Brand: 'SanDisk', UOM: 'PCS', Barcode: '8901012345676', HSNCode: '85235100', Weight: 0.0200, Volume: 0.0500, UnitCost: 550.00, SellingPrice: 850.00 }
-    ];
-
     try {
+      const pool = mssqlDb.getPool();
+      const query = `
+        SELECT 
+          CODE, name, alias, HSNCODE,
+          (SELECT NAME FROM MASTER1 M WHERE M.CODE=MASTER1.ParentGrp) AS ITEM_GRP,
+          d4 as purch_price,
+          d17 as purch_dis,
+          d3 as alt_sale_price,
+          d22 as alt_purch_price,
+          D2 AS MRP,
+          D16 AS SALE_DIS,
+          (SELECT NAME FROM MASTER1 m  WHERE m.CODE=MASTER1.CM1) AS MAINUNIT,
+          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM2) AS ALTUNIT,
+          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM9) AS vndor,
+          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM8) AS tax
+        FROM master1 
+        WHERE mastertype=6
+      `;
+
+      console.log('Fetching items from MSSQL ERP...');
+      const result = await pool.request().query(query);
+      const erpItems = result.recordset;
+      console.log(`Fetched ${erpItems.length} items from MSSQL ERP.`);
+
+      // Batch insert into MariaDB
+      const chunkSize = 1000;
       let syncedCount = 0;
-      for (const item of mockErpItems) {
-        await db.executeCmd(`
-          INSERT INTO tblItem (Code, Name, Description, Category, Brand, UOM, Barcode, HSNCode, Weight, Volume, UnitCost, SellingPrice, IsActive)
-          VALUES (@code, @name, @desc, @category, @brand, @uom, @barcode, @hsn, @weight, @volume, @cost, @price, 1)
-          ON DUPLICATE KEY UPDATE 
-            Name = @name, 
-            Description = @desc,
-            Category = @category,
-            Brand = @brand,
-            Barcode = @barcode,
-            HSNCode = @hsn,
-            Weight = @weight,
-            Volume = @volume,
-            UnitCost = @cost,
-            SellingPrice = @price
-        `, {
-          code: item.Code,
-          name: item.Name,
-          desc: item.Description,
-          category: item.Category,
-          brand: item.Brand,
-          uom: item.UOM,
-          barcode: item.Barcode,
-          hsn: item.HSNCode,
-          weight: item.Weight,
-          volume: item.Volume,
-          cost: item.UnitCost,
-          price: item.SellingPrice
-        });
-        syncedCount++;
+
+      for (let i = 0; i < erpItems.length; i += chunkSize) {
+        const chunk = erpItems.slice(i, i + chunkSize);
+        const values = chunk.map(row => {
+          const code = row.CODE ? String(row.CODE).trim() : (row.alias ? String(row.alias).trim() : (row.name ? String(row.name).trim() : ''));
+          const alias = row.alias ? String(row.alias).trim() : null;
+          const name = row.name ? String(row.name).trim() : code;
+          const uom = row.MAINUNIT ? String(row.MAINUNIT).trim() : 'PCS';
+          const hsnCode = row.HSNCODE ? String(row.HSNCODE).trim() : null;
+          const category = row.ITEM_GRP ? String(row.ITEM_GRP).trim() : 'General';
+          const purchPrice = row.purch_price !== null && row.purch_price !== undefined ? Number(row.purch_price) : 0.0;
+          const purchDiscount = row.purch_dis !== null && row.purch_dis !== undefined ? Number(row.purch_dis) : 0.0;
+          const altSalePrice = row.alt_sale_price !== null && row.alt_sale_price !== undefined ? Number(row.alt_sale_price) : 0.0;
+          const altPurchPrice = row.alt_purch_price !== null && row.alt_purch_price !== undefined ? Number(row.alt_purch_price) : 0.0;
+          const mrp = row.MRP !== null && row.MRP !== undefined ? Number(row.MRP) : 0.0;
+          const saleDiscount = row.SALE_DIS !== null && row.SALE_DIS !== undefined ? Number(row.SALE_DIS) : 0.0;
+          const mainUnit = row.MAINUNIT ? String(row.MAINUNIT).trim() : null;
+          const altUnit = row.ALTUNIT ? String(row.ALTUNIT).trim() : null;
+          const vendor = row.vndor ? String(row.vndor).trim() : null;
+          const tax = row.tax ? String(row.tax).trim() : null;
+
+          return [
+            code, alias, name, uom, hsnCode, category,
+            purchPrice, purchDiscount, altSalePrice, altPurchPrice,
+            mrp, saleDiscount, mainUnit, altUnit, vendor, tax, 1
+          ];
+        }).filter(item => item[0] !== ''); // exclude items with empty code
+
+        if (values.length > 0) {
+          // Bulk Insert query
+          await db.query(`
+            INSERT INTO tblItem (
+              Code, Alias, Name, UOM, HSNCode, Category, 
+              PurchPrice, PurchDiscount, AltSalePrice, AltPurchPrice, 
+              MRP, SaleDiscount, MainUnit, AltUnit, Vendor, Tax, IsActive
+            )
+            VALUES @values
+            ON DUPLICATE KEY UPDATE
+              Alias = VALUES(Alias),
+              Name = VALUES(Name),
+              UOM = VALUES(UOM),
+              HSNCode = VALUES(HSNCode),
+              Category = VALUES(Category),
+              PurchPrice = VALUES(PurchPrice),
+              PurchDiscount = VALUES(PurchDiscount),
+              AltSalePrice = VALUES(AltSalePrice),
+              AltPurchPrice = VALUES(AltPurchPrice),
+              MRP = VALUES(MRP),
+              SaleDiscount = VALUES(SaleDiscount),
+              MainUnit = VALUES(MainUnit),
+              AltUnit = VALUES(AltUnit),
+              Vendor = VALUES(Vendor),
+              Tax = VALUES(Tax)
+          `, { values });
+          syncedCount += values.length;
+        }
       }
 
       await db.executeCmd(`
         INSERT INTO tblApiLog (SyncType, Direction, Endpoint, RequestPayload, ResponsePayload, Status)
-        VALUES ('ITEM_SYNC', 'INBOUND', '/sync/items', @req, @res, 'SUCCESS')
+        VALUES ('ITEM_SYNC', 'INBOUND', '/sync/items', '{}', @res, 'SUCCESS')
       `, { 
-        req: JSON.stringify(mockErpItems), 
         res: JSON.stringify({ message: 'Sync successful', syncedCount }) 
       });
 
       return res.json({ message: 'Item Masters synchronized successfully', count: syncedCount });
     } catch (err: any) {
+      console.error('Failed to sync items from ERP:', err);
       await db.executeCmd(`
         INSERT INTO tblApiLog (SyncType, Direction, Endpoint, RequestPayload, ResponsePayload, Status, ErrorMessage)
         VALUES ('ITEM_SYNC', 'INBOUND', '/sync/items', '{}', '', 'ERROR', @err)
@@ -179,17 +345,18 @@ export class SyncController {
     const posToSync = req.body;
     const isManualImport = Array.isArray(posToSync) && posToSync.length > 0;
 
-    res.status(202).json({
-      message: 'ERP Purchase Order synchronization triggered in the background. Please check WMS Sync Audit Logs for progress status.'
-    });
-
-    setImmediate(async () => {
-      try {
-        await SyncController.performSyncPOs(posToSync, isManualImport);
-      } catch (err: any) {
-        console.error('[Sync Background PO Error]:', err);
-      }
-    });
+    try {
+      await SyncController.performSyncPOs(posToSync, isManualImport);
+      return res.json({
+        message: 'ERP Purchase Order synchronization completed successfully.'
+      });
+    } catch (err: any) {
+      console.error('[Sync PO Error]:', err);
+      return res.status(500).json({
+        message: 'ERP Purchase Order synchronization failed.',
+        error: err.message
+      });
+    }
   }
 
   // Actual PO sync background task
@@ -372,17 +539,18 @@ export class SyncController {
     const sosToSync = req.body;
     const isManualImport = Array.isArray(sosToSync) && sosToSync.length > 0;
 
-    res.status(202).json({
-      message: 'ERP Sales Order synchronization triggered in the background. Please check WMS Sync Audit Logs for progress status.'
-    });
-
-    setImmediate(async () => {
-      try {
-        await SyncController.performSyncSOs(sosToSync, isManualImport);
-      } catch (err: any) {
-        console.error('[Sync Background SO Error]:', err);
-      }
-    });
+    try {
+      await SyncController.performSyncSOs(sosToSync, isManualImport);
+      return res.json({
+        message: 'ERP Sales Order synchronization completed successfully.'
+      });
+    } catch (err: any) {
+      console.error('[Sync SO Error]:', err);
+      return res.status(500).json({
+        message: 'ERP Sales Order synchronization failed.',
+        error: err.message
+      });
+    }
   }
 
   // Actual SO sync background task
@@ -809,89 +977,55 @@ export class SyncController {
     const pool = mssqlDb.getPool();
     const query = `
       SELECT 
-          TRAN2.DATE AS VOUCHER_DATE,
-          C.ActionTime,
-          C.USERNAME AS PREPARED_BY,
-          (SELECT NAME FROM MASTER1 T WHERE T.CODE = TRAN2.MASTERCODE2) AS BRANCH,
-          TRAN2.VCHNO AS VOU_NO,
-          (SELECT NAME FROM MASTER1 WHERE CODE = TRAN2.CM1) AS PARTY,
-          P.CODE AS PARTY_CODE, -- WMS compatibility
-          TRAN2.MASTERCODE1 AS ITEM_ERP_CODE, -- WMS compatibility
-          (SELECT ALIAS FROM MASTER1 WHERE CODE = TRAN2.MASTERCODE1) AS ALIAS,
-          (SELECT NAME FROM MASTER1 U 
-           WHERE U.CODE = TRAN2.MASTERCODE1 AND U.MASTERTYPE = 6) AS ITEM_NAME,
-          (SELECT NAME FROM MASTER1 M WHERE M.CODE = ITEM.PARENTGRP) AS ITEM_GRP,
-          CASE WHEN ITEM.D1 = 1 THEN NULL ELSE ITEM.D1 END AS CON_FAC,
-          (SELECT CASE 
-              WHEN ITEM.CM1 = ITEM.CM2 THEN NULL
-              ELSE CONCAT(
-                  (SELECT NAME FROM MASTER1 WHERE MASTERTYPE = 8 AND CODE = ITEM.CM2),
-                  '/',
-                  (SELECT NAME FROM MASTER1 WHERE MASTERTYPE = 8 AND CODE = ITEM.CM1)
-              )
-          END) AS CON_TYP,
-          ABS(TRAN2.D1) AS QTY,
-          (SELECT NAME FROM MASTER1 WHERE CODE = TRAN2.CM2) AS UNITS,
-          TRAN2.VALUE3 AS TOTAL_AMOUNT,
-          CASE 
-              WHEN TRAN2.D1 = 0 THEN NULL 
-              ELSE (TRAN2.VALUE3 / ABS(TRAN2.D1)) 
-          END AS PER_PC_AMOUNT,
-          ITEM.D2 AS MRP,
-          CASE 
-              WHEN TRY_CONVERT(FLOAT, SUBSTRING(ITEM.C3,1,5)) > 0 
-              THEN ITEM.C3 
-              ELSE ITEM.D16 
-          END AS DIS_R,
-          (SELECT TOP 1 MA.D2 
-           FROM MASTERSUPPORT MA 
-           WHERE MA.MASTERCODE = ITEM.CODE AND MA.I1 = 101) AS DIS_A,
-          (SELECT TOP 1 MA.D2 
-           FROM MASTERSUPPORT MA 
-           WHERE MA.MASTERCODE = ITEM.CODE AND MA.I1 = 102) AS DIS_B,
-          (SELECT NAME 
-           FROM MASTER1 
-           WHERE CODE IN (
-               SELECT TOP 1 CM1 
-               FROM MASTERSUPPORT MS 
-               WHERE MS.MASTERCODE = TRAN2.MASTERCODE1
-           )) AS DISC_STR,
-          ITEM.D4 AS DP,
-          ITEM.D17 AS PUR_DIS,
-          (SELECT TOP 1 RIGHT(NAME,3) 
-           FROM MASTER1 
-           WHERE CODE = (
-               SELECT TOP 1 CM8 FROM MASTER1 WHERE CODE = ITEM.CODE
-           )) AS GST_RATE,
-          (SELECT OF1 FROM MASTERADDRESSINFO MA WHERE ITEM.CODE = MA.MASTERCODE) AS PD_HD_LD,
-          (SELECT TOP 1 NAME 
-           FROM MASTER1 
-           WHERE CODE = (
-               SELECT TOP 1 T.CM1 
-               FROM TRAN1 T 
-               WHERE VCHCODE = TRAN2.VCHCODE
-           )) AS PUR_TYPE
-      FROM TRAN2
-      INNER JOIN MASTER1 ITEM 
-          ON ITEM.CODE = TRAN2.MASTERCODE1
-         AND ITEM.MASTERTYPE = 6
-      INNER JOIN MASTER1 P 
-          ON P.CODE = TRAN2.CM1
-         AND P.MASTERTYPE = 2
-      INNER JOIN VCHOTHERINFO V 
-          ON V.VCHCODE = TRAN2.VCHCODE
-      INNER JOIN CHECKLIST C 
-          ON C.CODE = TRAN2.VCHCODE
-         AND C.TYPE = 2
-         AND C.ACTION = 1
+          TRAN3.SRNO,
+          TRAN3.VCHCODE,
+          TRY_CONVERT(DATETIME, V.OF2, 113) AS DELIVERYDATE,
+          T.DATE AS DATE,
+          T.VCHNO AS VCHNO,
+          (SELECT NAME FROM MASTER1 P WHERE P.CODE = TRAN3.MASTERCODE2) AS PARTYNAME,
+          TRAN3.MASTERCODE2 AS PARTY_CODE,
+          TRAN3.MASTERCODE1 AS ITEM_ERP_CODE,
+          M.NAME AS ITEMNAME,
+          M.ALIAS,
+          (SELECT USERNAME FROM CHECKLIST C WHERE C.CODE = T.VCHCODE AND C.TYPE = 2 AND C.ACTION = 1) AS ORDERBY,
+          (SELECT NAME FROM MASTER1 M1 WHERE convert(varchar(30), CODE) = V.OF4) AS SALESINC,
+          S.NAME AS SALESMAN,
+          ABS(T.D1) AS QTY,
+          (
+              SELECT ABS(SUM(VALUE1))
+              FROM TRAN3 T31
+              WHERE T31.REFCODE = TRAN3.REFCODE
+                AND T31.RECTYPE = 4
+          ) AS PENDINGQTY,
+          (SELECT NAME FROM MASTER1 U WHERE U.CODE = M.CM1) AS UNITS,
+          M.D2 AS MRP,
+          (CASE WHEN (TRY_CONVERT(FLOAT, SUBSTRING(M.C3, 1, 5))) > 0 THEN M.C3 ELSE M.D16 END) AS PURCHASEDIS,
+          T.C1 AS VCHDIS,
+          ABS(T.D6) AS LISTPRICE,
+          T.D5 AS AMOUNT,
+          (ABS(T.D6) * (SELECT ABS(SUM(VALUE1)) FROM TRAN3 T31 WHERE T31.REFCODE = TRAN3.REFCODE)) AS PAMT
+      FROM Tran3, MASTER1 M, TRAN2 T, VCHOTHERINFO V, MASTER1 S 
       WHERE 
-          TRAN2.VCHTYPE = 13
-          AND TRAN2.TRANTYPE IN (0,3)
-          AND TRAN2.DATE >= @startdate
-          AND TRAN2.DATE <= @enddate
+          Tran3.method = 1 
+          AND M.CODE = TRAN3.MASTERCODE1 
+          AND M.MASTERTYPE = 6 
+          AND T.MASTERCODE1 = M.CODE 
+          AND V.VCHCODE = T.VCHCODE 
+          AND TRAN3.VCHCODE = V.VCHCODE 
+          AND S.CODE = V.OF3
+          AND T.DATE >= @startdate 
+          AND T.DATE <= @enddate
+          AND T.VCHTYPE = 13 
+          AND TRAN3.VCHTYPE = 13 
+          AND TRAN3.refcode IN (SELECT refcode FROM TRAN3 t32 WHERE t32.rectype = 4 GROUP BY t32.refcode) 
+          AND (
+              SELECT ABS(SUM(VALUE1))
+              FROM TRAN3 T31
+              WHERE T31.REFCODE = TRAN3.REFCODE
+                AND T31.RECTYPE = 4
+          ) > 0
       ORDER BY 
-          TRAN2.DATE DESC,
-          TRAN2.VCHNO ASC
+          TRY_CONVERT(DATETIME, V.OF2, 113) DESC
     `;
 
     const start = new Date(startDateParam);
@@ -904,10 +1038,10 @@ export class SyncController {
 
     const poMap = new Map<string, any>();
     for (const row of result.recordset) {
-      const vouNo = row.VOU_NO ? String(row.VOU_NO).trim() : '';
+      const vouNo = row.VCHNO ? String(row.VCHNO).trim() : '';
       if (!vouNo) continue;
       
-      const vendorName = row.PARTY ? String(row.PARTY).trim() : '';
+      const vendorName = row.PARTYNAME ? String(row.PARTYNAME).trim() : '';
       const vendorCode = row.PARTY_CODE ? String(row.PARTY_CODE).trim() : vendorName;
       const itemCode = row.ALIAS ? String(row.ALIAS).trim() : (row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : '');
       if (!itemCode) continue;
@@ -917,20 +1051,21 @@ export class SyncController {
           POCode: vouNo,
           VendorName: vendorName,
           VendorCode: vendorCode,
-          OrderDate: row.VOUCHER_DATE ? new Date(row.VOUCHER_DATE).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-          PreparedBy: row.PREPARED_BY ? String(row.PREPARED_BY).trim() : null,
+          OrderDate: row.DATE ? new Date(row.DATE).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+          PreparedBy: row.ORDERBY ? String(row.ORDERBY).trim() : null,
+          DeliveryDate: row.DELIVERYDATE ? new Date(row.DELIVERYDATE).toISOString().slice(0, 10) : null,
           Items: []
         });
       }
 
       poMap.get(vouNo).Items.push({
         ItemCode: itemCode,
-        ItemName: row.ITEM_NAME ? String(row.ITEM_NAME).trim() : itemCode,
-        ItemGrp: row.ITEM_GRP ? String(row.ITEM_GRP).trim() : 'General',
-        HSNCode: row.HSNCODE ? String(row.HSNCODE).trim() : null,
+        ItemName: row.ITEMNAME ? String(row.ITEMNAME).trim() : itemCode,
+        ItemGrp: 'General',
+        HSNCode: null,
         OrderQty: Math.abs(row.QTY || 0),
         UOM: row.UNITS ? String(row.UNITS).trim() : 'PCS',
-        UnitPrice: row.PER_PC_AMOUNT || 0
+        UnitPrice: row.LISTPRICE || (row.QTY > 0 ? (row.AMOUNT / row.QTY) : 0) || 0
       });
     }
 

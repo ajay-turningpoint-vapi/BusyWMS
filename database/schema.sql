@@ -156,6 +156,16 @@ CREATE TABLE tblItem (
     SellingPrice DECIMAL(18,4) DEFAULT 0.00,               -- Phase 2: selling price per unit
     MinStock     DECIMAL(18,4) DEFAULT 0.00,
     MaxStock     DECIMAL(18,4) DEFAULT 999999.00,
+    PurchPrice   DECIMAL(18,4) DEFAULT 0.00,
+    PurchDiscount DECIMAL(18,4) DEFAULT 0.00,
+    AltSalePrice DECIMAL(18,4) DEFAULT 0.00,
+    AltPurchPrice DECIMAL(18,4) DEFAULT 0.00,
+    MRP          DECIMAL(18,4) DEFAULT 0.00,
+    SaleDiscount DECIMAL(18,4) DEFAULT 0.00,
+    MainUnit     VARCHAR(50) DEFAULT NULL,
+    AltUnit      VARCHAR(50) DEFAULT NULL,
+    Vendor       VARCHAR(150) DEFAULT NULL,
+    Tax          VARCHAR(50) DEFAULT NULL,
     IsActive     BIT DEFAULT 1 NOT NULL,
     CreatedAt    DATETIME DEFAULT GETDATE(),
     UpdatedAt    DATETIME DEFAULT GETDATE()

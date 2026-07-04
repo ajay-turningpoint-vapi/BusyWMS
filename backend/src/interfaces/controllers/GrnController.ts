@@ -238,8 +238,66 @@ export class GrnController {
   
   public static async getPurchaseOrders(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query('SELECT * FROM tblPurchaseOrder ORDER BY OrderDate DESC, POId DESC');
-      return res.json(rows);
+      const page = parseInt(req.query.page as string || '0', 10);
+      const limit = parseInt(req.query.limit as string || '25', 10);
+      const search = (req.query.search as string || '').trim();
+      const status = (req.query.status as string || '').trim();
+      const startDate = (req.query.startDate as string || '').trim();
+      const endDate = (req.query.endDate as string || '').trim();
+
+      let whereClause = 'WHERE 1=1';
+      const params: Record<string, any> = {};
+
+      if (search) {
+        whereClause += ' AND (po.POCode LIKE @searchPattern OR po.VendorName LIKE @searchPattern OR po.VendorCode LIKE @searchPattern OR po.PreparedBy LIKE @searchPattern)';
+        params.searchPattern = `%${search}%`;
+      }
+      if (status) {
+        whereClause += ' AND po.Status = @status';
+        params.status = status;
+      }
+      if (startDate) {
+        whereClause += ' AND po.OrderDate >= @startDate';
+        params.startDate = startDate;
+      }
+      if (endDate) {
+        whereClause += ' AND po.OrderDate <= @endDate';
+        params.endDate = endDate + ' 23:59:59';
+      }
+
+      const isPaginated = req.query.page !== undefined;
+
+      if (isPaginated) {
+        const offset = page * limit;
+        params.limit = limit;
+        params.offset = offset;
+
+        // Query total
+        const countQuery = `SELECT COUNT(po.POId) AS total FROM tblPurchaseOrder po ${whereClause}`;
+        const countRows = await db.query(countQuery, params);
+        const total = countRows.length > 0 ? countRows[0].total : 0;
+
+        // Query paginated POs
+        const selectQuery = `
+          SELECT po.* 
+          FROM tblPurchaseOrder po 
+          ${whereClause} 
+          ORDER BY po.OrderDate DESC, po.POId DESC 
+          LIMIT @limit OFFSET @offset
+        `;
+        const items = await db.query(selectQuery, params);
+
+        return res.json({ items, total });
+      } else {
+        const selectQuery = `
+          SELECT po.* 
+          FROM tblPurchaseOrder po 
+          ${whereClause} 
+          ORDER BY po.OrderDate DESC, po.POId DESC
+        `;
+        const items = await db.query(selectQuery, params);
+        return res.json(items);
+      }
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }

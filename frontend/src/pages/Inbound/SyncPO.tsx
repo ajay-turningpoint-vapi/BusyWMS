@@ -32,6 +32,7 @@ export default function SyncPO() {
   const [statusFilter, setStatusFilter] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [totalCount, setTotalCount] = useState(0);
   const pagination = usePagination(25);
 
   // Confirm dialog state
@@ -67,8 +68,18 @@ export default function SyncPO() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const posRes = await api.get('/inbound/purchase-orders');
-      setPurchaseOrders(posRes.data);
+      const params = new URLSearchParams();
+      params.append('page', String(pagination.page));
+      params.append('limit', String(pagination.rowsPerPage));
+      if (searchQuery) params.append('search', searchQuery);
+      if (statusFilter) params.append('status', statusFilter);
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+
+      const posRes = await api.get(`/inbound/purchase-orders?${params.toString()}`);
+      setPurchaseOrders(posRes.data.items || []);
+      setTotalCount(posRes.data.total || 0);
+
       const logsRes = await api.get('/sync/logs');
       setSyncLogs(logsRes.data.filter((l: any) => l.SyncType === 'PO_SYNC'));
       setLoading(false);
@@ -90,9 +101,12 @@ export default function SyncPO() {
   };
 
   useEffect(() => {
-    loadData();
     loadLookups();
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [pagination.page, pagination.rowsPerPage, searchQuery, statusFilter, startDate, endDate]);
 
   const triggerSync = async () => {
     setSyncing(true);
@@ -191,31 +205,9 @@ export default function SyncPO() {
     setDeleteTarget(null);
   };
 
-  // Filtered + Searched data
-  const filteredPOs = useMemo(() => {
-    let data = purchaseOrders;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      data = data.filter((po: any) =>
-        po.POCode?.toLowerCase().includes(q) ||
-        po.VendorName?.toLowerCase().includes(q) ||
-        po.VendorCode?.toLowerCase().includes(q) ||
-        po.PreparedBy?.toLowerCase().includes(q)
-      );
-    }
-    if (statusFilter) {
-      data = data.filter((po: any) => po.Status === statusFilter);
-    }
-    if (startDate) {
-      data = data.filter((po: any) => po.OrderDate >= startDate);
-    }
-    if (endDate) {
-      data = data.filter((po: any) => po.OrderDate <= endDate + 'T23:59:59');
-    }
-    return data;
-  }, [purchaseOrders, searchQuery, statusFilter, startDate, endDate]);
-
-  const paginatedPOs = pagination.paginate(filteredPOs);
+  // Filtered and paginated POs are already computed on the server-side
+  const filteredPOs = purchaseOrders;
+  const paginatedPOs = purchaseOrders;
 
   const handleExportCSV = () => {
     exportToCSV(filteredPOs, [
@@ -324,12 +316,12 @@ export default function SyncPO() {
           <Button 
             variant="outlined" 
             color="primary" 
-            startIcon={<RefreshCw className={syncing ? 'animate-spin' : ''} size={16} />}
+            startIcon={syncing ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />}
             onClick={triggerSync}
             disabled={syncing}
             sx={{ fontWeight: 600 }}
           >
-            {syncing ? 'Syncing ERP...' : 'Pull ERP POs'}
+            {syncing ? 'Syncing...' : 'Pull ERP POs'}
           </Button>
         </Box>
       </Box>
@@ -356,7 +348,7 @@ export default function SyncPO() {
           onEndDateChange={(v) => { setEndDate(v); pagination.resetPage(); }}
         />
         <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-          {filteredPOs.length} of {purchaseOrders.length} POs
+          Total {totalCount} POs
         </Typography>
       </Box>
 
@@ -426,7 +418,7 @@ export default function SyncPO() {
               )}
             </TableContainer>
             <TablePaginationBar
-              count={filteredPOs.length}
+              count={totalCount}
               page={pagination.page}
               rowsPerPage={pagination.rowsPerPage}
               onPageChange={pagination.setPage}
@@ -495,6 +487,19 @@ export default function SyncPO() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Synchronization Backdrop Loader */}
+      <Dialog open={syncing} disableEscapeKeyDown PaperProps={{ sx: { p: 3, textAlign: 'center', maxWidth: 360 } }}>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, py: 2 }}>
+            <CircularProgress size={48} color="primary" />
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>Pulling ERP POs</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Synchronizing pending Purchase Orders from Busy accounting ERP database... Please wait.
+            </Typography>
+          </Box>
+        </DialogContent>
+      </Dialog>
 
       {/* Manual Entry / Edit Dialog */}
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)} fullWidth maxWidth="md">
