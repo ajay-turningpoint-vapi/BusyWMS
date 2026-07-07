@@ -9,6 +9,7 @@ import { Printer, Edit, Check, X, Trash2 } from 'lucide-react';
 import { useTransactionModalStore } from '../store/transactionModalStore';
 import { useAuthStore } from '../store/authStore';
 import api from '../services/api';
+import ConfirmDialog from './ConfirmDialog';
 
 export default function TransactionDrilldownDialog() {
   const { isOpen, type, id, mode, closeTransaction, openTransaction } = useTransactionModalStore();
@@ -19,6 +20,7 @@ export default function TransactionDrilldownDialog() {
   const [data, setData] = useState<any>(null);
   const [editFields, setEditFields] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !id || !type) return;
@@ -323,7 +325,7 @@ export default function TransactionDrilldownDialog() {
     openTransaction(type!, id!, 'edit');
   };
 
-  const handleDelete = async () => {
+  const handleDeleteClick = () => {
     if (!type || !id) return;
     
     if (!hasPermission('delete')) {
@@ -331,8 +333,12 @@ export default function TransactionDrilldownDialog() {
       return;
     }
 
-    const confirmed = window.confirm(`Are you sure you want to delete this ${type} voucher? This action will permanently remove the transaction record and cannot be undone.`);
-    if (!confirmed) return;
+    setConfirmDeleteOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    setConfirmDeleteOpen(false);
+    if (!type || !id) return;
 
     setSaving(true);
     try {
@@ -803,7 +809,7 @@ export default function TransactionDrilldownDialog() {
               </Button>
             )}
             {hasPermission('delete') && (
-              <Button variant="contained" color="error" startIcon={<Trash2 size={16} />} onClick={handleDelete} disabled={saving}>
+              <Button variant="contained" color="error" startIcon={<Trash2 size={16} />} onClick={handleDeleteClick} disabled={saving}>
                 Delete Voucher
               </Button>
             )}
@@ -815,6 +821,15 @@ export default function TransactionDrilldownDialog() {
         )}
         <Button variant="outlined" onClick={closeTransaction}>Close</Button>
       </DialogActions>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title={`Delete ${type} Voucher`}
+        message={`Are you sure you want to delete this ${type} voucher? This action will permanently remove the transaction record and cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => setConfirmDeleteOpen(false)}
+      />
     </Dialog>
   );
 }

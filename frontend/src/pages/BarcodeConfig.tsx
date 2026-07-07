@@ -8,6 +8,7 @@ import {
 } from '@mui/material';
 import { Printer, Plus, Save, Trash, Check, Sliders, Eye } from 'lucide-react';
 import api from '../services/api';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 export default function BarcodeConfig() {
   const [templates, setTemplates] = useState<any[]>([]);
@@ -18,6 +19,10 @@ export default function BarcodeConfig() {
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
+
+  // Confirm delete dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   
   // Form fields
   const [name, setName] = useState('');
@@ -173,15 +178,22 @@ export default function BarcodeConfig() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm('Are you sure you want to delete this template?')) return;
+  const handleDeleteClick = (id: number) => {
+    setDeleteTarget(id);
+    setConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setConfirmOpen(false);
     try {
-      await api.delete(`/barcode/templates/${id}`);
+      await api.delete(`/barcode/templates/${deleteTarget}`);
       setSuccessMsg('Barcode template deleted successfully.');
       fetchTemplates();
     } catch (err: any) {
       setErrorMsg('Failed to delete template.');
     }
+    setDeleteTarget(null);
   };
 
   const handleSetDefault = async (id: number) => {
@@ -250,7 +262,7 @@ export default function BarcodeConfig() {
                     </TableCell>
                     <TableCell align="right">
                       <Button size="small" onClick={() => handleOpenEdit(t)}>Edit</Button>
-                      <Button size="small" color="error" onClick={() => handleDelete(t.TemplateId)} sx={{ ml: 1 }}>Delete</Button>
+                      <Button size="small" color="error" onClick={() => handleDeleteClick(t.TemplateId)} sx={{ ml: 1 }}>Delete</Button>
                     </TableCell>
                   </TableRow>
                 ))
@@ -560,6 +572,15 @@ export default function BarcodeConfig() {
           </DialogActions>
         </form>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete Barcode Template"
+        message="Are you sure you want to delete this barcode template? This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => { setConfirmOpen(false); setDeleteTarget(null); }}
+      />
     </Box>
   );
 }

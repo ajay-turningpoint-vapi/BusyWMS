@@ -240,23 +240,28 @@ export class SyncController {
           CODE, name, alias, HSNCODE,
           (SELECT NAME FROM MASTER1 M WHERE M.CODE=MASTER1.ParentGrp) AS ITEM_GRP,
           d4 as purch_price,
-          d17 as purch_dis,
-          d3 as alt_sale_price,
-          d22 as alt_purch_price,
-          D2 AS MRP,
+          d21 as alt_sale_price,
+          D3 AS MRP,
           D16 AS SALE_DIS,
           (SELECT NAME FROM MASTER1 m  WHERE m.CODE=MASTER1.CM1) AS MAINUNIT,
           (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM2) AS ALTUNIT,
           (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM9) AS vndor,
-          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM8) AS tax
+          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.B16) AS tax
         FROM master1 
         WHERE mastertype=6
+        ORDER BY alias
       `;
 
       console.log('Fetching items from MSSQL ERP...');
       const result = await pool.request().query(query);
       const erpItems = result.recordset;
       console.log(`Fetched ${erpItems.length} items from MSSQL ERP.`);
+
+      // Clear existing synced items before full re-import
+      await db.executeCmd('SET FOREIGN_KEY_CHECKS = 0');
+      await db.executeCmd('TRUNCATE TABLE tblItem');
+      await db.executeCmd('SET FOREIGN_KEY_CHECKS = 1');
+      console.log('Cleared existing items for clean re-sync.');
 
       // Batch insert into MariaDB
       const chunkSize = 1000;
@@ -272,9 +277,7 @@ export class SyncController {
           const hsnCode = row.HSNCODE ? String(row.HSNCODE).trim() : null;
           const category = row.ITEM_GRP ? String(row.ITEM_GRP).trim() : 'General';
           const purchPrice = row.purch_price !== null && row.purch_price !== undefined ? Number(row.purch_price) : 0.0;
-          const purchDiscount = row.purch_dis !== null && row.purch_dis !== undefined ? Number(row.purch_dis) : 0.0;
           const altSalePrice = row.alt_sale_price !== null && row.alt_sale_price !== undefined ? Number(row.alt_sale_price) : 0.0;
-          const altPurchPrice = row.alt_purch_price !== null && row.alt_purch_price !== undefined ? Number(row.alt_purch_price) : 0.0;
           const mrp = row.MRP !== null && row.MRP !== undefined ? Number(row.MRP) : 0.0;
           const saleDiscount = row.SALE_DIS !== null && row.SALE_DIS !== undefined ? Number(row.SALE_DIS) : 0.0;
           const mainUnit = row.MAINUNIT ? String(row.MAINUNIT).trim() : null;
@@ -284,7 +287,7 @@ export class SyncController {
 
           return [
             code, alias, name, uom, hsnCode, category,
-            purchPrice, purchDiscount, altSalePrice, altPurchPrice,
+            purchPrice, altSalePrice,
             mrp, saleDiscount, mainUnit, altUnit, vendor, tax, 1
           ];
         }).filter(item => item[0] !== ''); // exclude items with empty code
@@ -294,7 +297,7 @@ export class SyncController {
           await db.query(`
             INSERT INTO tblItem (
               Code, Alias, Name, UOM, HSNCode, Category, 
-              PurchPrice, PurchDiscount, AltSalePrice, AltPurchPrice, 
+              PurchPrice, AltSalePrice, 
               MRP, SaleDiscount, MainUnit, AltUnit, Vendor, Tax, IsActive
             )
             VALUES @values
@@ -305,9 +308,7 @@ export class SyncController {
               HSNCode = VALUES(HSNCode),
               Category = VALUES(Category),
               PurchPrice = VALUES(PurchPrice),
-              PurchDiscount = VALUES(PurchDiscount),
               AltSalePrice = VALUES(AltSalePrice),
-              AltPurchPrice = VALUES(AltPurchPrice),
               MRP = VALUES(MRP),
               SaleDiscount = VALUES(SaleDiscount),
               MainUnit = VALUES(MainUnit),

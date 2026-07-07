@@ -531,8 +531,7 @@ export default function Masters() {
         { key: 'Alias', header: 'Alias' },
         { key: 'HSNCode', header: 'HSN Code' },
         { key: 'Category', header: 'Item Group' },
-        { key: 'AltSalePrice', header: 'Alt Sale Price' },
-        { key: 'AltPurchPrice', header: 'Alt Purch Price' },
+        { key: 'AltSalePrice', header: 'Sale Price' },
         { key: 'MRP', header: 'MRP' },
         { key: 'SaleDiscount', header: 'Sale Discount' },
         { key: 'MainUnit', header: 'Main Unit' },
@@ -733,8 +732,7 @@ export default function Masters() {
                       <TableCell sx={{ fontWeight: 600 }}>Alias</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>HSN Code</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Item Group</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Alt Sale Price</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Alt Purch Price</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Sale Price</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>MRP</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Sale Discount</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Main Unit</TableCell>
@@ -808,7 +806,6 @@ export default function Masters() {
                         <TableCell>{row.HSNCode || 'N/A'}</TableCell>
                         <TableCell>{row.Category || 'General'}</TableCell>
                         <TableCell>₹{parseFloat(row.AltSalePrice || 0).toFixed(2)}</TableCell>
-                        <TableCell>₹{parseFloat(row.AltPurchPrice || 0).toFixed(2)}</TableCell>
                         <TableCell>₹{parseFloat(row.MRP || 0).toFixed(2)}</TableCell>
                         <TableCell>{parseFloat(row.SaleDiscount || 0).toFixed(2)}%</TableCell>
                         <TableCell>{row.MainUnit || 'N/A'}</TableCell>
@@ -1037,12 +1034,7 @@ export default function Masters() {
                                 size="small" 
                                 variant="outlined" 
                                 onClick={() => handleEditClick(
-                                  tabValue === 0 ? row.WarehouseId :
-                                  tabValue === 1 ? row.ZoneId :
-                                  tabValue === 2 ? row.RackId :
-                                  tabValue === 3 ? row.ShelfId :
-                                  tabValue === 4 ? row.BinId :
-                                  tabValue === 8 ? row.UserId : row.AisleId,
+                                  row,
                                   tabValue === 0 ? 'warehouse' :
                                   tabValue === 1 ? 'zone' :
                                   tabValue === 2 ? 'rack' :
