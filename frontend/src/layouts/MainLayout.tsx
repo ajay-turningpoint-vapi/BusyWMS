@@ -11,7 +11,7 @@ import {
   UserCircle, LogOut, ChevronRight, Menu as MenuIcon, Search,
   ShoppingCart, Inbox, ClipboardCheck, Archive, Warehouse, 
   UploadCloud, ListChecks, Package, Truck, BarChart3, Settings, Printer,
-  CornerDownLeft, ListTodo, AlertTriangle, RefreshCw
+  CornerDownLeft, ListTodo, AlertTriangle, RefreshCw, ChevronDown
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useTransactionModalStore } from '../store/transactionModalStore';
@@ -29,7 +29,7 @@ interface MenuItemType {
 }
 
 export default function MainLayout() {
-  const { user, logout, themeMode, toggleTheme } = useAuthStore();
+  const { user, logout, themeMode, toggleTheme, setWarehouseId } = useAuthStore();
   const { clickSetting, setClickSetting } = useTransactionModalStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -64,21 +64,37 @@ export default function MainLayout() {
     });
   };
   
-  // BUG-019 FIX: Dynamic warehouse name from user profile
-  const [activeWarehouse, setActiveWarehouse] = useState<string>('Loading...');
-  
+  // Dynamic warehouse switcher
+  const [warehouses, setWarehouses] = useState<any[]>([]);
+  const [warehouseAnchor, setWarehouseAnchor] = useState<null | HTMLElement>(null);
+
   useEffect(() => {
-    if (user?.warehouseId) {
-      api.get('/masters/warehouses')
-        .then(res => {
-          const wh = res.data.find((w: any) => String(w.WarehouseId) === String(user.warehouseId));
-          setActiveWarehouse(wh ? `${wh.Name} (${wh.Code})` : `WH-${user.warehouseId}`);
-        })
-        .catch(() => setActiveWarehouse(`WH-${user.warehouseId}`));
-    } else {
-      setActiveWarehouse('All Warehouses');
-    }
-  }, [user?.warehouseId]);
+    api.get('/masters/warehouses')
+      .then(res => {
+        setWarehouses(res.data);
+      })
+      .catch(err => {
+        console.error('Failed to fetch warehouses', err);
+      });
+  }, []);
+
+  const activeWarehouseObj = warehouses.find(w => String(w.WarehouseId) === String(user?.warehouseId));
+  const activeWarehouseLabel = user?.warehouseId
+    ? (activeWarehouseObj ? `${activeWarehouseObj.Name} (${activeWarehouseObj.Code})` : `WH-${user.warehouseId}`)
+    : 'All Warehouses';
+
+  const handleWarehouseClick = (event: React.MouseEvent<HTMLElement>) => {
+    setWarehouseAnchor(event.currentTarget);
+  };
+
+  const handleWarehouseClose = () => {
+    setWarehouseAnchor(null);
+  };
+
+  const handleWarehouseSelect = (warehouseId: number | null) => {
+    setWarehouseId(warehouseId);
+    setWarehouseAnchor(null);
+  };
 
   // Dynamic WMS search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -464,12 +480,40 @@ export default function MainLayout() {
           </Breadcrumbs>
           
           <Chip 
-            label={`WH: ${activeWarehouse}`} 
+            label={`WH: ${activeWarehouseLabel}`} 
             size="small" 
             color="primary" 
             variant="outlined" 
-            sx={{ fontWeight: 600 }} 
+            onClick={handleWarehouseClick}
+            onDelete={handleWarehouseClick}
+            deleteIcon={<ChevronDown size={14} style={{ marginLeft: 2, marginRight: -2 }} />}
+            sx={{ 
+              fontWeight: 600, 
+              cursor: 'pointer',
+              pr: 0.5,
+              '&:hover': {
+                backgroundColor: 'primary.light',
+                borderColor: 'primary.main',
+              },
+              transition: 'all 0.2s ease-in-out'
+            }} 
           />
+          <Menu
+            anchorEl={warehouseAnchor}
+            open={Boolean(warehouseAnchor)}
+            onClose={handleWarehouseClose}
+            transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+            anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+          >
+            <MenuItem onClick={() => handleWarehouseSelect(null)}>
+              All Warehouses
+            </MenuItem>
+            {warehouses.map((wh) => (
+              <MenuItem key={wh.WarehouseId} onClick={() => handleWarehouseSelect(wh.WarehouseId)}>
+                {wh.Name} ({wh.Code})
+              </MenuItem>
+            ))}
+          </Menu>
         </Box>
 
         <Divider sx={{ mb: 3 }} />

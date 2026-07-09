@@ -14,6 +14,7 @@ import TransactionLink from '../../components/TransactionLink';
 import Barcode from '../../components/Barcode';
 import BarcodePrintDialog from '../../components/BarcodePrintDialog';
 import TablePaginationBar, { usePagination } from '../../components/TablePaginationBar';
+import { useAuthStore } from '../../store/authStore';
 
 // Compact Code128 B pattern representation (width of alternate bars & spaces)
 const CODE128_PATTERNS = [
@@ -70,6 +71,7 @@ function renderNativeCode128SvgHtml(text: string, width: number, height: number,
 }
 
 export default function Reports() {
+  const { user } = useAuthStore();
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const tabParam = queryParams.get('tab');
@@ -137,6 +139,7 @@ export default function Reports() {
 
   // ASN Reports States
   const [asnReportView, setAsnReportView] = useState('summary');
+  const [warehouses, setWarehouses] = useState<any[]>([]);
 
   const loadReport = async (tabIndex: number) => {
     if (tabIndex === 4) {
@@ -145,6 +148,7 @@ export default function Reports() {
     }
     setLoading(true);
     setError('');
+    setData([]);
     let endpoint = '/reports/stock';
     if (tabIndex === 1) endpoint = '/reports/pending-so';
     else if (tabIndex === 2) endpoint = '/reports/pending-po';
@@ -181,7 +185,6 @@ export default function Reports() {
     setCustomerFilter('');
     setVendorFilter('');
     setItemFilter('');
-    setWarehouseFilter('');
     setStatusFilter('');
     setOrderNoFilter('');
     setBranchFilter('');
@@ -191,12 +194,28 @@ export default function Reports() {
     pagination.resetPage();
   }, [asnReportView]);
 
-  // Load items catalogue on mount for Barcode Management dropdown
+  // Load items catalogue and warehouses on mount
   useEffect(() => {
     api.get('/masters/items')
       .then(res => setItemsList(res.data))
       .catch(err => console.error('Failed to load items catalogue', err));
+
+    api.get('/masters/warehouses')
+      .then(res => setWarehouses(res.data))
+      .catch(err => console.error('Failed to load warehouses', err));
   }, []);
+
+  // Synchronize warehouse filter with active warehouse from navbar
+  useEffect(() => {
+    if (user?.warehouseId && warehouses.length > 0) {
+      const activeWh = warehouses.find(w => String(w.WarehouseId) === String(user.warehouseId));
+      if (activeWh) {
+        setWarehouseFilter(activeWh.Code);
+      }
+    } else if (user?.warehouseId === null || user?.warehouseId === undefined) {
+      setWarehouseFilter('');
+    }
+  }, [user?.warehouseId, warehouses]);
 
   const handleItemSelect = (itemId: string) => {
     setSelectedItemId(itemId);
@@ -346,7 +365,11 @@ export default function Reports() {
     }
 
     if (warehouseFilter && row.WarehouseCode !== warehouseFilter) return false;
-    if (statusFilter && (row.Status || row.ASNStatus) !== statusFilter) return false;
+    if (statusFilter) {
+      const rowStat = (row.Status || row.ASNStatus || '').toString().toLowerCase().replace(/_/g, ' ');
+      const filterStat = statusFilter.toString().toLowerCase().replace(/_/g, ' ');
+      if (rowStat !== filterStat) return false;
+    }
     
     if (tabValue === 5) {
       if (zoneFilter && row.ZoneCode !== zoneFilter && row.ZoneName !== zoneFilter) return false;
@@ -365,11 +388,11 @@ export default function Reports() {
     }
 
     if (branchFilter) {
-      if (branchFilter === 'Delhi' && row.WarehouseCode !== 'WH-DEL') return false;
-      if (branchFilter === 'Mumbai' && row.WarehouseCode !== 'WH-BOM') return false;
+      const wh = warehouses.find(w => w.Name.split(' ')[0] === branchFilter);
+      if (wh && row.WarehouseCode !== wh.Code) return false;
     }
 
-    if (excludeCompleted) {
+    if (excludeCompleted && !statusFilter) {
       if (tabValue === 1 && row.Status === 'Fully Dispatched') return false;
       if (tabValue === 2 && row.Status === 'Fully Received') return false;
     }
@@ -785,18 +808,23 @@ export default function Reports() {
                 />
               </Grid>
 
-              {/* Warehouse selection */}
+               {/* Warehouse selection */}
               <Grid item xs={12} sm={2.3}>
                 <FormControl fullWidth size="small">
-                  <InputLabel>Warehouse</InputLabel>
+                  <InputLabel id="warehouse-filter-label">Warehouse</InputLabel>
                   <Select
+                    labelId="warehouse-filter-label"
+                    id="warehouse-filter-select"
                     value={warehouseFilter}
                     label="Warehouse"
                     onChange={(e) => setWarehouseFilter(e.target.value)}
                   >
                     <MenuItem value="">All Warehouses</MenuItem>
-                    <MenuItem value="WH-DEL">Delhi Main (WH-DEL)</MenuItem>
-                    <MenuItem value="WH-BOM">Mumbai Port (WH-BOM)</MenuItem>
+                    {warehouses.map((wh) => (
+                      <MenuItem key={wh.Code} value={wh.Code}>
+                        {wh.Name} ({wh.Code})
+                      </MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
@@ -804,15 +832,18 @@ export default function Reports() {
               {/* Branch filter */}
               <Grid item xs={12} sm={2.3}>
                 <FormControl fullWidth size="small">
-                  <InputLabel>Branch</InputLabel>
+                  <InputLabel id="branch-filter-label">Branch</InputLabel>
                   <Select
+                    labelId="branch-filter-label"
+                    id="branch-filter-select"
                     value={branchFilter}
                     label="Branch"
                     onChange={(e) => setBranchFilter(e.target.value)}
                   >
                     <MenuItem value="">All Branches</MenuItem>
-                    <MenuItem value="Delhi">Delhi Branch</MenuItem>
-                    <MenuItem value="Mumbai">Mumbai Branch</MenuItem>
+                    {Array.from(new Set(warehouses.map(w => w.Name.split(' ')[0]))).sort().map(branch => (
+                      <MenuItem key={branch} value={branch}>{branch} Branch</MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
@@ -821,8 +852,10 @@ export default function Reports() {
               {tabValue === 1 && (
                 <Grid item xs={12} sm={3}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>Customer</InputLabel>
+                    <InputLabel id="customer-filter-label">Customer</InputLabel>
                     <Select
+                      labelId="customer-filter-label"
+                      id="customer-filter-select"
                       value={customerFilter}
                       label="Customer"
                       onChange={(e) => setCustomerFilter(e.target.value)}
@@ -839,8 +872,10 @@ export default function Reports() {
               {tabValue === 2 && (
                 <Grid item xs={12} sm={3}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>Vendor</InputLabel>
+                    <InputLabel id="vendor-filter-label">Vendor</InputLabel>
                     <Select
+                      labelId="vendor-filter-label"
+                      id="vendor-filter-select"
                       value={vendorFilter}
                       label="Vendor"
                       onChange={(e) => setVendorFilter(e.target.value)}
@@ -858,8 +893,10 @@ export default function Reports() {
                 <>
                   <Grid item xs={12} sm={3}>
                     <FormControl fullWidth size="small">
-                      <InputLabel>ASN Report View</InputLabel>
+                      <InputLabel id="asn-view-filter-label">ASN Report View</InputLabel>
                       <Select
+                        labelId="asn-view-filter-label"
+                        id="asn-view-filter-select"
                         value={asnReportView}
                         label="ASN Report View"
                         onChange={(e) => setAsnReportView(e.target.value)}
@@ -877,8 +914,10 @@ export default function Reports() {
                   {asnReportView !== 'supplier' && (
                     <Grid item xs={12} sm={3}>
                       <FormControl fullWidth size="small">
-                        <InputLabel>Supplier</InputLabel>
+                        <InputLabel id="supplier-filter-label">Supplier</InputLabel>
                         <Select
+                          labelId="supplier-filter-label"
+                          id="supplier-filter-select"
                           value={vendorFilter}
                           label="Supplier"
                           onChange={(e) => setVendorFilter(e.target.value)}
@@ -895,8 +934,10 @@ export default function Reports() {
                   {['pending', 'variance'].includes(asnReportView) && (
                     <Grid item xs={12} sm={3}>
                       <FormControl fullWidth size="small">
-                        <InputLabel>Item Selection</InputLabel>
+                        <InputLabel id="asn-item-filter-label">Item Selection</InputLabel>
                         <Select
+                          labelId="asn-item-filter-label"
+                          id="asn-item-filter-select"
                           value={itemFilter}
                           label="Item Selection"
                           onChange={(e) => setItemFilter(e.target.value)}
@@ -913,8 +954,10 @@ export default function Reports() {
                   {['summary', 'status', 'date'].includes(asnReportView) && (
                     <Grid item xs={12} sm={3}>
                       <FormControl fullWidth size="small">
-                        <InputLabel>ASN Status</InputLabel>
+                        <InputLabel id="asn-status-filter-label">ASN Status</InputLabel>
                         <Select
+                          labelId="asn-status-filter-label"
+                          id="asn-status-filter-select"
                           value={statusFilter}
                           label="ASN Status"
                           onChange={(e) => setStatusFilter(e.target.value)}
@@ -933,11 +976,13 @@ export default function Reports() {
                 </>
               )}
 
-              {(tabValue === 1 || tabValue === 2 || tabValue === 6) && (
+              {(tabValue === 0 || tabValue === 1 || tabValue === 2) && (
                 <Grid item xs={12} sm={3}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>Item Selection</InputLabel>
+                    <InputLabel id="item-filter-label">Item Selection</InputLabel>
                     <Select
+                      labelId="item-filter-label"
+                      id="item-filter-select"
                       value={itemFilter}
                       label="Item Selection"
                       onChange={(e) => setItemFilter(e.target.value)}
@@ -954,8 +999,10 @@ export default function Reports() {
               {(tabValue === 1 || tabValue === 2) && (
                 <Grid item xs={12} sm={3}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>Status</InputLabel>
+                    <InputLabel id="status-filter-label">Status</InputLabel>
                     <Select
+                      labelId="status-filter-label"
+                      id="status-filter-select"
                       value={statusFilter}
                       label="Status"
                       onChange={(e) => setStatusFilter(e.target.value)}
@@ -1333,32 +1380,51 @@ export default function Reports() {
                             <TableCell><code>{row.ItemCode}</code></TableCell>
                             <TableCell>{row.ItemName}</TableCell>
                             <TableCell align="right">{row.OrderQty} {row.UOM}</TableCell>
-                            <TableCell align="right">{row.ShippedQty} {row.UOM}</TableCell>
-                            <TableCell align="right">
-                              <Tooltip title="Click to view dispatch history" arrow>
-                                <Typography 
-                                  component="span"
-                                  onClick={() => openHistory(row, 'SO')}
-                                  sx={{
-                                    cursor: 'pointer',
-                                    color: 'primary.main',
-                                    fontWeight: 700,
-                                    textDecoration: 'underline',
-                                    '&:hover': { color: 'primary.dark' }
-                                  }}
-                                >
-                                  {row.PendingQty} {row.UOM}
-                                </Typography>
-                              </Tooltip>
-                            </TableCell>
-                            <TableCell>
-                              <Chip 
-                                size="small" 
-                                label={row.Status} 
-                                color={row.Status === 'Fully Dispatched' ? 'success' : row.Status === 'Partially Dispatched' ? 'warning' : 'default'}
-                                sx={{ fontWeight: 600 }}
-                              />
-                            </TableCell>
+                             <TableCell align="right">
+                               <Tooltip title="Click to view dispatch history" arrow>
+                                 <Typography 
+                                   component="span"
+                                   onClick={() => openHistory(row, 'SO')}
+                                   sx={{
+                                     cursor: 'pointer',
+                                     color: 'primary.main',
+                                     fontWeight: 700,
+                                     textDecoration: 'underline',
+                                     '&:hover': { color: 'primary.dark' }
+                                   }}
+                                 >
+                                   {row.ShippedQty} {row.UOM}
+                                 </Typography>
+                               </Tooltip>
+                             </TableCell>
+                             <TableCell align="right">
+                               <Tooltip title="Click to view dispatch history" arrow>
+                                 <Typography 
+                                   component="span"
+                                   onClick={() => openHistory(row, 'SO')}
+                                   sx={{
+                                     cursor: 'pointer',
+                                     color: 'primary.main',
+                                     fontWeight: 700,
+                                     textDecoration: 'underline',
+                                     '&:hover': { color: 'primary.dark' }
+                                   }}
+                                 >
+                                   {row.PendingQty} {row.UOM}
+                                 </Typography>
+                               </Tooltip>
+                             </TableCell>
+                             <TableCell>
+                               <Tooltip title="Click to view dispatch history" arrow>
+                                 <Chip 
+                                   size="small" 
+                                   label={row.Status} 
+                                   onClick={() => openHistory(row, 'SO')}
+                                   color={row.Status === 'Fully Dispatched' ? 'success' : row.Status === 'Partially Dispatched' ? 'warning' : 'default'}
+                                   sx={{ fontWeight: 600, cursor: 'pointer' }}
+                                 />
+                               </Tooltip>
+                             </TableCell>
                             <TableCell>{row.WarehouseCode}</TableCell>
                             <TableCell align="right" sx={{ fontWeight: 600, color: row.AgeingDays > 5 ? 'error.main' : 'text.primary' }}>
                               {row.AgeingDays} days
@@ -1804,7 +1870,7 @@ export default function Reports() {
         open={historyModalOpen} 
         onClose={() => setHistoryModalOpen(false)} 
         fullWidth 
-        maxWidth="sm"
+        maxWidth="md"
       >
         <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
           <History size={20} />

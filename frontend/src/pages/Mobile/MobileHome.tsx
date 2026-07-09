@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import api from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
 
 // Types for scanning
 interface ScannedItem {
@@ -27,6 +28,7 @@ interface ScannedItem {
 }
 
 export default function MobileHome() {
+  const { user } = useAuthStore();
   const [screen, setScreen] = useState<'menu' | 'grn' | 'asn' | 'putaway' | 'pick' | 'pack' | 'dispatch' | 'count' | 'transfer' | 'print'>('menu');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
@@ -487,7 +489,8 @@ export default function MobileHome() {
       try {
         const suggest = await api.post('/putaway/suggest', {
           itemId: matchedPutaway.ItemId,
-          quantity: matchedPutaway.PendingPutawayQty
+          quantity: matchedPutaway.PendingPutawayQty,
+          warehouseId: user?.warehouseId
         });
         setPutawaySuggestedBins(suggest.data || []);
       } catch (err) {
@@ -1435,7 +1438,11 @@ export default function MobileHome() {
                             onClick={() => {
                               setPutawayLine(p);
                               setPutawayQty(p.PendingPutawayQty);
-                              api.post('/putaway/suggest', { itemId: p.ItemId, quantity: p.PendingPutawayQty })
+                              api.post('/putaway/suggest', { 
+                                itemId: p.ItemId, 
+                                quantity: p.PendingPutawayQty,
+                                warehouseId: user?.warehouseId
+                              })
                                 .then(res => setPutawaySuggestedBins(res.data || []));
                             }}
                             sx={{ justifyContent: 'space-between', textTransform: 'none', py: 1, color: 'text.primary', borderColor: '#cbd5e1' }}

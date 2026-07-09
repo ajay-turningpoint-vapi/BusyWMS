@@ -12,8 +12,10 @@ import SearchBar from '../../components/SearchBar';
 import TablePaginationBar, { usePagination } from '../../components/TablePaginationBar';
 import { exportToCSV } from '../../utils/exportCSV';
 import { useToast } from '../../contexts/ToastContext';
+import { useAuthStore } from '../../store/authStore';
 
 export default function Putaway() {
+  const { user } = useAuthStore();
   const [pendingItems, setPendingItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -63,7 +65,8 @@ export default function Putaway() {
       // Get suggested bins from backend algorithm (stored procedure)
       const res = await api.post('/putaway/suggest', {
         itemId: item.ItemId,
-        quantity: item.PendingPutawayQty
+        quantity: item.PendingPutawayQty,
+        warehouseId: user?.warehouseId
       });
       setSuggestions(res.data);
       if (res.data.length > 0) {

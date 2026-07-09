@@ -290,8 +290,8 @@ export default function Masters() {
         barcode: row.Barcode || '',
         trackBatch: row.TrackBatch === 1 || row.TrackBatch === true,
         trackSerial: row.TrackSerial === 1 || row.TrackSerial === true,
-        minStock: row.MinStock || 0,
-        maxStock: row.MaxStock || 999999,
+        minStock: row.MinStock !== undefined && row.MinStock !== null && Number(row.MinStock) !== 0 ? row.MinStock : 1,
+        maxStock: row.MaxStock !== undefined && row.MaxStock !== null && Number(row.MaxStock) !== 0 && Number(row.MaxStock) !== 999999 ? row.MaxStock : 1,
         unitCost: row.UnitCost || 0.0,
         sellingPrice: row.SellingPrice || 0.0,
         weight: row.Weight || 0.0,
@@ -335,7 +335,6 @@ export default function Masters() {
 
   const handleOpenModal = () => {
     loadLookups();
-    setFormData({});
     setIsEditMode(false);
     setEditRecordId(null);
     if (tabValue === 0) setModalType('warehouse');
@@ -343,11 +342,17 @@ export default function Masters() {
     if (tabValue === 2) setModalType('rack');
     if (tabValue === 3) setModalType('shelf');
     if (tabValue === 4) setModalType('bin');
-    if (tabValue === 5) setModalType('item');
+    if (tabValue === 5) {
+      setModalType('item');
+      setFormData({ minStock: 1, maxStock: 1 });
+      setOpenModal(true);
+      return;
+    }
     if (tabValue === 6) setModalType('customer');
     if (tabValue === 7) setModalType('supplier');
     if (tabValue === 8) setModalType('user');
     if (tabValue === 9) setModalType('aisle');
+    setFormData({});
     setOpenModal(true);
   };
 
@@ -454,6 +459,15 @@ export default function Masters() {
     }
 
     const submissionData = { ...formData };
+    if (modalType === 'item') {
+      const min = Number(submissionData.minStock !== undefined && submissionData.minStock !== null ? submissionData.minStock : 1);
+      const max = Number(submissionData.maxStock !== undefined && submissionData.maxStock !== null ? submissionData.maxStock : 1);
+      if (min > max) {
+        toast.showError('Min Stock cannot be greater than Max Stock.');
+        return;
+      }
+    }
+
     if (modalType === 'customer' && !isEditMode && !submissionData.code) {
       submissionData.code = 'CUST-' + Date.now();
     }
@@ -1157,7 +1171,10 @@ export default function Masters() {
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
           {modalType === 'warehouse' && (
             <>
-              <TextField label="Warehouse Code" name="code" value={formData.code || ''} required fullWidth size="small" onChange={handleInputChange} />
+              {isEditMode && (
+                <TextField label="Warehouse Code" name="code" value={formData.code || ''} fullWidth size="small" disabled 
+                  helperText="Auto-generated, cannot be changed" />
+              )}
               <TextField label="Warehouse Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} />
               <TextField label="Address" name="address" value={formData.address || ''} fullWidth multiline rows={2} size="small" onChange={handleInputChange} />
             </>
@@ -1171,7 +1188,10 @@ export default function Masters() {
                   {warehouses.map(wh => <MenuItem key={wh.WarehouseId} value={wh.WarehouseId}>{wh.Name}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Zone Code" name="code" value={formData.code || ''} required fullWidth size="small" onChange={handleInputChange} />
+              {isEditMode && (
+                <TextField label="Zone Code" name="code" value={formData.code || ''} fullWidth size="small" disabled
+                  helperText="Auto-generated, cannot be changed" />
+              )}
               <TextField label="Zone Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} />
             </>
           )}
@@ -1193,7 +1213,10 @@ export default function Masters() {
                   ))}
                 </Select>
               </FormControl>
-              <TextField label="Rack Code" name="code" value={formData.code || ''} required fullWidth size="small" onChange={handleInputChange} />
+              {isEditMode && (
+                <TextField label="Rack Code" name="code" value={formData.code || ''} fullWidth size="small" disabled
+                  helperText="Auto-generated, cannot be changed" />
+              )}
               <TextField label="Rack Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} />
             </>
           )}
@@ -1219,7 +1242,10 @@ export default function Masters() {
                   {racks.map(r => <MenuItem key={r.RackId} value={r.RackId}>{r.Name} ({r.Code})</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Shelf Code" name="code" value={formData.code || ''} required fullWidth size="small" onChange={handleInputChange} />
+              {isEditMode && (
+                <TextField label="Shelf Code" name="code" value={formData.code || ''} fullWidth size="small" disabled
+                  helperText="Auto-generated, cannot be changed" />
+              )}
               <TextField label="Shelf Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} />
             </>
           )}
@@ -1232,8 +1258,14 @@ export default function Masters() {
                   {shelves.map(sh => <MenuItem key={sh.ShelfId} value={sh.ShelfId}>{sh.Code} (Rack {sh.RackCode || `ID: ${sh.RackId}`})</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Bin Locator Code (e.g. WH01-Z02-R01-S01-B05)" name="code" value={formData.code || ''} required fullWidth size="small" onChange={handleInputChange} />
-              <TextField label="Barcode" name="barcode" value={formData.barcode || ''} required fullWidth size="small" onChange={handleInputChange} />
+              {isEditMode && (
+                <>
+                  <TextField label="Bin Locator Code" name="code" value={formData.code || ''} fullWidth size="small" disabled
+                    helperText="Auto-generated, cannot be changed" />
+                  <TextField label="Barcode" name="barcode" value={formData.barcode || ''} fullWidth size="small" disabled
+                    helperText="Auto-generated, cannot be changed" />
+                </>
+              )}
               <TextField label="Capacity Weight (kg)" name="capacityWeight" type="number" value={formData.capacityWeight || 1000} fullWidth size="small" onChange={handleInputChange} />
               <TextField label="Capacity Volume (L)" name="capacityVolume" type="number" value={formData.capacityVolume || 500} fullWidth size="small" onChange={handleInputChange} />
             </>
@@ -1241,27 +1273,27 @@ export default function Masters() {
 
           {modalType === 'item' && (
             <>
-              <TextField label="Item Code" name="code" value={formData.code || ''} required fullWidth size="small" onChange={handleInputChange} />
-              <TextField label="Item Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} />
-              <TextField label="Category" name="category" value={formData.category || ''} fullWidth size="small" onChange={handleInputChange} />
-              <TextField label="Brand" name="brand" value={formData.brand || ''} fullWidth size="small" onChange={handleInputChange} />
-              <TextField label="UOM" name="uom" value={formData.uom || ''} required placeholder="e.g. PCS, BOX" fullWidth size="small" onChange={handleInputChange} />
-              <TextField label="Barcode" name="barcode" value={formData.barcode || ''} fullWidth size="small" onChange={handleInputChange} />
+              <TextField label="Item Code" name="code" value={formData.code || ''} required fullWidth size="small" onChange={handleInputChange} disabled />
+              <TextField label="Item Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} disabled />
+              <TextField label="Category" name="category" value={formData.category || ''} fullWidth size="small" onChange={handleInputChange} disabled />
+              <TextField label="Brand" name="brand" value={formData.brand || ''} fullWidth size="small" onChange={handleInputChange} disabled />
+              <TextField label="UOM" name="uom" value={formData.uom || ''} required placeholder="e.g. PCS, BOX" fullWidth size="small" onChange={handleInputChange} disabled />
+              <TextField label="Barcode" name="barcode" value={formData.barcode || ''} fullWidth size="small" onChange={handleInputChange} disabled />
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <TextField label="Unit Weight (kg)" name="weight" type="number" inputProps={{ step: "0.01" }} value={formData.weight !== undefined ? formData.weight : 0} fullWidth size="small" onChange={handleInputChange} />
                 <TextField label="Unit Volume (L)" name="volume" type="number" inputProps={{ step: "0.01" }} value={formData.volume !== undefined ? formData.volume : 0} fullWidth size="small" onChange={handleInputChange} />
               </Box>
               <Box sx={{ display: 'flex', gap: 2 }}>
-                <TextField label="Min Stock" name="minStock" type="number" value={formData.minStock || 0} fullWidth size="small" onChange={handleInputChange} />
-                <TextField label="Max Stock" name="maxStock" type="number" value={formData.maxStock || 999999} fullWidth size="small" onChange={handleInputChange} />
+                <TextField label="Min Stock" name="minStock" type="number" value={formData.minStock !== undefined && formData.minStock !== null ? formData.minStock : 1} fullWidth size="small" onChange={handleInputChange} />
+                <TextField label="Max Stock" name="maxStock" type="number" value={formData.maxStock !== undefined && formData.maxStock !== null ? formData.maxStock : 1} fullWidth size="small" onChange={handleInputChange} />
               </Box>
               <Box sx={{ display: 'flex', gap: 2 }}>
-                <TextField label="Unit Cost" name="unitCost" type="number" value={formData.unitCost || 0} fullWidth size="small" onChange={handleInputChange} />
-                <TextField label="Selling Price" name="sellingPrice" type="number" value={formData.sellingPrice || 0} fullWidth size="small" onChange={handleInputChange} />
+                <TextField label="Unit Cost" name="unitCost" type="number" value={formData.unitCost || 0} fullWidth size="small" onChange={handleInputChange} disabled />
+                <TextField label="Selling Price" name="sellingPrice" type="number" value={formData.sellingPrice || 0} fullWidth size="small" onChange={handleInputChange} disabled />
               </Box>
               <Box sx={{ display: 'flex', gap: 2 }}>
-                <FormControlLabel control={<Switch name="trackBatch" checked={!!formData.trackBatch} onChange={handleSwitchChange} />} label="Track Batch" />
-                <FormControlLabel control={<Switch name="trackSerial" checked={!!formData.trackSerial} onChange={handleSwitchChange} />} label="Track Serial No" />
+                <FormControlLabel control={<Switch name="trackBatch" checked={!!formData.trackBatch} onChange={handleSwitchChange} disabled />} label="Track Batch" />
+                <FormControlLabel control={<Switch name="trackSerial" checked={!!formData.trackSerial} onChange={handleSwitchChange} disabled />} label="Track Serial No" />
               </Box>
             </>
           )}

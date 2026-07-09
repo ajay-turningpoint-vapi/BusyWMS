@@ -35,7 +35,7 @@ export class DamageController {
       const damageCode = `DMG-${Date.now()}`;
       await db.executeCmd(`
         INSERT INTO tblDamage (DamageCode, ItemId, BinId, BatchId, SerialId, Quantity, DamageReason, DamageType, ReportedBy, Status)
-        VALUES (@damageCode, @itemId, @binId, @batchId, @serialId, @quantity, @damageReason, @damageType || 'PHYSICAL', @userId, 'REPORTED')
+        VALUES (@damageCode, @itemId, @binId, @batchId, @serialId, @quantity, @damageReason, COALESCE(@damageType, 'PHYSICAL'), @userId, 'REPORTED')
       `, { 
         damageCode, 
         itemId, 
@@ -63,8 +63,8 @@ export class DamageController {
 
       // 4. Update Bin Capacity (reduce occupied capacity)
       const items = await db.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId });
-      const itemWeight = items.length > 0 && items[0].Weight !== null ? Number(items[0].Weight) : 2.0;
-      const itemVolume = items.length > 0 && items[0].Volume !== null ? Number(items[0].Volume) : 1.5;
+      const itemWeight = items.length > 0 && items[0].Weight !== null && Number(items[0].Weight) > 0 ? Number(items[0].Weight) : 2.0;
+      const itemVolume = items.length > 0 && items[0].Volume !== null && Number(items[0].Volume) > 0 ? Number(items[0].Volume) : 1.5;
 
       const weightDelta = quantity * itemWeight;
       const volumeDelta = quantity * itemVolume;
@@ -176,8 +176,8 @@ export class DamageController {
 
         // Restore Bin Capacity
         const items = await db.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId: dmg.ItemId });
-        const itemWeight = items.length > 0 && items[0].Weight !== null ? Number(items[0].Weight) : 2.0;
-        const itemVolume = items.length > 0 && items[0].Volume !== null ? Number(items[0].Volume) : 1.5;
+        const itemWeight = items.length > 0 && items[0].Weight !== null && Number(items[0].Weight) > 0 ? Number(items[0].Weight) : 2.0;
+        const itemVolume = items.length > 0 && items[0].Volume !== null && Number(items[0].Volume) > 0 ? Number(items[0].Volume) : 1.5;
 
         const weightDelta = dmg.Quantity * itemWeight;
         const volumeDelta = dmg.Quantity * itemVolume;

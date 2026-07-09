@@ -824,12 +824,20 @@ export class ReportController {
         SELECT so.SOId, so.SOCode, so.OrderDate, so.CustomerName, so.CustomerCode,
                sod.SODetailId, sod.ItemId, sod.OrderQty, sod.ShippedQty, sod.UOM,
                item.Code AS ItemCode, item.Name AS ItemName,
-               'WH-DEL' AS WarehouseCode
+               COALESCE(w.Code, 'WH-DEL') AS WarehouseCode
         FROM tblSalesOrder so
         INNER JOIN tblSalesOrderDetail sod ON so.SOId = sod.SOId
         INNER JOIN tblItem item ON sod.ItemId = item.ItemId
-        WHERE so.Status NOT IN ('DISPATCHED', 'CANCELLED')
-          AND sod.OrderQty > sod.ShippedQty
+        LEFT JOIN (
+            SELECT DISTINCT r.SOId, wh.Code
+            FROM tblReservation r
+            INNER JOIN tblBin b ON r.BinId = b.BinId
+            INNER JOIN tblShelf sh ON b.ShelfId = sh.ShelfId
+            INNER JOIN tblRack rk ON sh.RackId = rk.RackId
+            INNER JOIN tblZone z ON rk.ZoneId = z.ZoneId
+            INNER JOIN tblWarehouse wh ON z.WarehouseId = wh.WarehouseId
+        ) w ON so.SOId = w.SOId
+        WHERE so.Status != 'CANCELLED'
         ORDER BY so.OrderDate DESC, so.SOId DESC
       `);
       
@@ -867,12 +875,22 @@ export class ReportController {
         SELECT po.POId, po.POCode, po.OrderDate, po.VendorName, po.VendorCode,
                pod.PODetailId, pod.ItemId, pod.OrderQty, pod.ReceivedQty, pod.UOM,
                item.Code AS ItemCode, item.Name AS ItemName,
-               'WH-DEL' AS WarehouseCode
+               COALESCE(w.Code, 'WH-DEL') AS WarehouseCode
         FROM tblPurchaseOrder po
         INNER JOIN tblPurchaseOrderDetail pod ON po.POId = pod.POId
         INNER JOIN tblItem item ON pod.ItemId = item.ItemId
-        WHERE po.Status IN ('PENDING', 'PARTIAL')
-          AND pod.OrderQty > pod.ReceivedQty
+        LEFT JOIN (
+            SELECT DISTINCT g.POId, wh.Code
+            FROM tblGRN g
+            INNER JOIN tblGRNDetail gd ON g.GRNId = gd.GRNId
+            INNER JOIN tblPutaway p ON gd.GRNDetailId = p.GRNDetailId
+            INNER JOIN tblBin b ON p.BinId = b.BinId
+            INNER JOIN tblShelf sh ON b.ShelfId = sh.ShelfId
+            INNER JOIN tblRack rk ON sh.RackId = rk.RackId
+            INNER JOIN tblZone z ON rk.ZoneId = z.ZoneId
+            INNER JOIN tblWarehouse wh ON z.WarehouseId = wh.WarehouseId
+        ) w ON po.POId = w.POId
+        WHERE po.Status != 'CANCELLED'
         ORDER BY po.OrderDate DESC, po.POId DESC
       `);
 

@@ -23,6 +23,7 @@ interface AuthState {
   setAuth: (token: string, user: User) => void;
   logout: () => void;
   toggleTheme: () => void;
+  setWarehouseId: (warehouseId: number | null) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => {
@@ -54,6 +55,15 @@ export const useAuthStore = create<AuthState>((set) => {
         const nextMode = state.themeMode === 'light' ? 'dark' : 'light';
         localStorage.setItem('wms_theme', nextMode);
         return { themeMode: nextMode };
+      });
+    },
+
+    setWarehouseId: (warehouseId) => {
+      set((state) => {
+        if (!state.user) return {};
+        const updatedUser = { ...state.user, warehouseId: warehouseId || undefined };
+        localStorage.setItem('wms_user', JSON.stringify(updatedUser));
+        return { user: updatedUser };
       });
     }
   };

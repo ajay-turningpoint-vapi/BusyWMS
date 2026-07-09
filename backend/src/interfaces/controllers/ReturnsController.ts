@@ -115,8 +115,8 @@ export class ReturnsController {
 
         // Update Bin capacity weight/volume
         const items = await db.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId: ret.ItemId });
-        const itemWeight = items.length > 0 && items[0].Weight !== null ? Number(items[0].Weight) : 2.0;
-        const itemVolume = items.length > 0 && items[0].Volume !== null ? Number(items[0].Volume) : 1.5;
+        const itemWeight = items.length > 0 && items[0].Weight !== null && Number(items[0].Weight) > 0 ? Number(items[0].Weight) : 2.0;
+        const itemVolume = items.length > 0 && items[0].Volume !== null && Number(items[0].Volume) > 0 ? Number(items[0].Volume) : 1.5;
 
         const weightDelta = ret.Quantity * itemWeight;
         const volumeDelta = ret.Quantity * itemVolume;

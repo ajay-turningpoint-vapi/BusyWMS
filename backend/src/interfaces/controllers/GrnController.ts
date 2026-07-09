@@ -435,7 +435,7 @@ export class GrnController {
   public static async deletePurchaseOrder(req: AuthenticatedRequest, res: Response) {
     const { poId } = req.params;
     try {
-      const existing = await db.query('SELECT Status FROM tblPurchaseOrder WHERE POId = @poId', { poId });
+      const existing = await db.query('SELECT POCode, Status FROM tblPurchaseOrder WHERE POId = @poId', { poId });
       if (existing.length === 0) {
         return res.status(404).json({ message: 'Purchase Order not found' });
       }
@@ -443,7 +443,14 @@ export class GrnController {
         return res.status(400).json({ message: 'Only PENDING Purchase Orders can be deleted.' });
       }
 
+      const poCode = existing[0].POCode;
+
       await db.transaction(async (tx) => {
+        // Track deleted PO code to prevent sync from re-importing it
+        if (poCode) {
+          await tx.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedPurchaseOrder (POCode VARCHAR(100) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+          await tx.executeCmd('INSERT IGNORE INTO tblDeletedPurchaseOrder (POCode) VALUES (@poCode)', { poCode });
+        }
         await tx.executeCmd('DELETE FROM tblPurchaseOrderDetail WHERE POId = @poId', { poId });
         await tx.executeCmd('DELETE FROM tblPurchaseOrder WHERE POId = @poId', { poId });
       });

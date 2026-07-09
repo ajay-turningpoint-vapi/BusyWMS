@@ -5,18 +5,11 @@ async function run() {
     host: 'localhost', port: 3306, user: 'wms_user', password: 'Busy@123', database: 'BusyWMSV1'
   });
   try {
-    const [before] = await conn.query('SELECT COUNT(*) as cnt FROM tblItem');
-    console.log(`Items before: ${before[0].cnt}`);
-    
-    await conn.query('SET FOREIGN_KEY_CHECKS = 0');
-    await conn.query('TRUNCATE TABLE tblItem');
-    await conn.query('SET FOREIGN_KEY_CHECKS = 1');
-    
-    const [after] = await conn.query('SELECT COUNT(*) as cnt FROM tblItem');
-    console.log(`Items after:  ${after[0].cnt}`);
-    console.log('✅ tblItem cleared successfully. Ready for fresh ERP sync.');
+    const [rows] = await conn.query('SELECT * FROM tblBin LIMIT 10');
+    console.log('\nSample bins:');
+    rows.forEach(r => console.log(r));
   } catch (err) {
-    console.error('Failed:', err.message);
+    console.error(err.message);
   }
   await conn.end();
   process.exit(0);

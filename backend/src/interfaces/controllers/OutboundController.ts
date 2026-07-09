@@ -242,8 +242,8 @@ export class OutboundController {
         // 3. Update bin occupied capacity (deduct weight)
         // Use item-specific weight/volume if available, fallback to defaults
         const itemInfo = await db.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId: pd.ItemId });
-        const itemWeight = itemInfo.length > 0 && itemInfo[0].Weight !== null ? Number(itemInfo[0].Weight) : 2.0;
-        const itemVolume = itemInfo.length > 0 && itemInfo[0].Volume !== null ? Number(itemInfo[0].Volume) : 1.5;
+        const itemWeight = itemInfo.length > 0 && itemInfo[0].Weight !== null && Number(itemInfo[0].Weight) > 0 ? Number(itemInfo[0].Weight) : 2.0;
+        const itemVolume = itemInfo.length > 0 && itemInfo[0].Volume !== null && Number(itemInfo[0].Volume) > 0 ? Number(itemInfo[0].Volume) : 1.5;
         const weightDelta = addedQty * itemWeight;
         const volumeDelta = addedQty * itemVolume;
         await db.executeCmd(`
@@ -405,7 +405,7 @@ export class OutboundController {
   public static async deleteSalesOrder(req: AuthenticatedRequest, res: Response) {
     const { soId } = req.params;
     try {
-      const existing = await db.query('SELECT Status FROM tblSalesOrder WHERE SOId = @soId', { soId });
+      const existing = await db.query('SELECT SOCode, Status FROM tblSalesOrder WHERE SOId = @soId', { soId });
       if (existing.length === 0) {
         return res.status(404).json({ message: 'Sales Order not found' });
       }
@@ -413,7 +413,14 @@ export class OutboundController {
         return res.status(400).json({ message: 'Only PENDING Sales Orders can be deleted.' });
       }
 
+      const soCode = existing[0].SOCode;
+
       await db.transaction(async (tx) => {
+        // Track deleted SO code to prevent sync from re-importing it
+        if (soCode) {
+          await tx.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedSalesOrder (SOCode VARCHAR(100) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+          await tx.executeCmd('INSERT IGNORE INTO tblDeletedSalesOrder (SOCode) VALUES (@soCode)', { soCode });
+        }
         await tx.executeCmd('DELETE FROM tblSalesOrderDetail WHERE SOId = @soId', { soId });
         await tx.executeCmd('DELETE FROM tblSalesOrder WHERE SOId = @soId', { soId });
       });
@@ -468,6 +475,11 @@ export class OutboundController {
         itemCount: itemCount || 0,
         notes: notes || null
       });
+
+      // Update Pick List status to PACKED
+      await db.executeCmd(`
+        UPDATE tblPickList SET Status = 'PACKED', UpdatedAt = CURRENT_TIMESTAMP WHERE PickListId = @pickListId
+      `, { pickListId });
 
       // Update SO status to PACKED
       const pickHeader = await db.query('SELECT SOId FROM tblPickList WHERE PickListId = @pickListId', { pickListId });

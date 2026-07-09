@@ -24,11 +24,11 @@ export class PutawayController {
 
     try {
       // Call Stored Procedure to check volume, weight, and layout suitability
-      // Defaulting warehouseId to 1 if not specified
+      // Defaulting warehouseId to user's warehouseId or 1 if not specified
       const bins = await db.executeSp('sp_AllocateBinForPutaway', {
         ItemId: itemId,
         Qty: quantity,
-        PreferredWarehouseId: warehouseId || 1
+        PreferredWarehouseId: warehouseId || req.user?.warehouseId || 1
       });
       return res.json(bins);
     } catch (err: any) {

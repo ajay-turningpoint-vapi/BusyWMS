@@ -49,8 +49,21 @@ export class SyncController {
 
       console.log('Fetching suppliers from MSSQL ERP...');
       const result = await pool.request().query(query);
-      const erpSuppliers = result.recordset;
+      let erpSuppliers = result.recordset;
       console.log(`Fetched ${erpSuppliers.length} suppliers from MSSQL ERP.`);
+
+      // Ensure tblDeletedSupplier exists and query deleted codes
+      await db.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedSupplier (Code VARCHAR(50) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+      const deletedRows = await db.query('SELECT Code FROM tblDeletedSupplier');
+      const deletedCodes = new Set(deletedRows.map((r: any) => String(r.Code).trim()));
+
+      // Filter out deleted suppliers
+      const beforeCount = erpSuppliers.length;
+      erpSuppliers = erpSuppliers.filter((row: any) => {
+        const code = row.CODE ? String(row.CODE).trim() : '';
+        return !deletedCodes.has(code);
+      });
+      console.log(`Filtered out ${beforeCount - erpSuppliers.length} deleted suppliers. ${erpSuppliers.length} suppliers remain for sync.`);
 
       // Batch insert into MariaDB
       const chunkSize = 1000;
@@ -155,8 +168,21 @@ export class SyncController {
 
       console.log('Fetching customers from MSSQL ERP...');
       const result = await pool.request().query(query);
-      const erpCustomers = result.recordset;
+      let erpCustomers = result.recordset;
       console.log(`Fetched ${erpCustomers.length} customers from MSSQL ERP.`);
+
+      // Ensure tblDeletedCustomer exists and query deleted codes
+      await db.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedCustomer (Code VARCHAR(50) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+      const deletedRows = await db.query('SELECT Code FROM tblDeletedCustomer');
+      const deletedCodes = new Set(deletedRows.map((r: any) => String(r.Code).trim()));
+
+      // Filter out deleted customers
+      const beforeCount = erpCustomers.length;
+      erpCustomers = erpCustomers.filter((row: any) => {
+        const code = row.CODE ? String(row.CODE).trim() : '';
+        return !deletedCodes.has(code);
+      });
+      console.log(`Filtered out ${beforeCount - erpCustomers.length} deleted customers. ${erpCustomers.length} customers remain for sync.`);
 
       // Batch insert into MariaDB
       const chunkSize = 1000;
@@ -254,14 +280,21 @@ export class SyncController {
 
       console.log('Fetching items from MSSQL ERP...');
       const result = await pool.request().query(query);
-      const erpItems = result.recordset;
+      let erpItems = result.recordset;
       console.log(`Fetched ${erpItems.length} items from MSSQL ERP.`);
 
-      // Clear existing synced items before full re-import
-      await db.executeCmd('SET FOREIGN_KEY_CHECKS = 0');
-      await db.executeCmd('TRUNCATE TABLE tblItem');
-      await db.executeCmd('SET FOREIGN_KEY_CHECKS = 1');
-      console.log('Cleared existing items for clean re-sync.');
+      // Ensure tblDeletedItem exists and query deleted codes
+      await db.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedItem (Code VARCHAR(50) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+      const deletedRows = await db.query('SELECT Code FROM tblDeletedItem');
+      const deletedCodes = new Set(deletedRows.map((r: any) => String(r.Code).trim()));
+
+      // Filter out deleted items
+      const beforeCount = erpItems.length;
+      erpItems = erpItems.filter((row: any) => {
+        const code = row.CODE ? String(row.CODE).trim() : '';
+        return !deletedCodes.has(code);
+      });
+      console.log(`Filtered out ${beforeCount - erpItems.length} deleted items. ${erpItems.length} items remain for sync.`);
 
       // Batch insert into MariaDB
       const chunkSize = 1000;
@@ -374,6 +407,19 @@ export class SyncController {
         console.log(`[Sync] Fetching ERP POs from MSSQL for range: ${startDate.toISOString()} to ${endDate.toISOString()}`);
         posToSync = await SyncController.fetchPOsFromMSSQL(startDate.toISOString(), endDate.toISOString());
       }
+
+      // Ensure tblDeletedPurchaseOrder exists and query deleted PO codes
+      await db.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedPurchaseOrder (POCode VARCHAR(100) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+      const deletedRows = await db.query('SELECT POCode FROM tblDeletedPurchaseOrder');
+      const deletedPOCodes = new Set(deletedRows.map((r: any) => String(r.POCode).trim()));
+
+      // Filter out deleted POs
+      const beforeCount = posToSync.length;
+      posToSync = posToSync.filter((po: any) => {
+        const code = po.POCode ? String(po.POCode).trim() : '';
+        return !deletedPOCodes.has(code);
+      });
+      console.log(`[Sync PO] Filtered out ${beforeCount - posToSync.length} deleted POs. ${posToSync.length} POs remain for sync.`);
 
       // 1. Gather all unique item codes from POs and resolve/insert them in parallel batches
       const uniqueItemCodes = new Set<string>();
@@ -568,6 +614,19 @@ export class SyncController {
         console.log(`[Sync] Fetching ERP SOs from MSSQL for range: ${startDate.toISOString()} to ${endDate.toISOString()}`);
         sosToSync = await SyncController.fetchSOsFromMSSQL(startDate.toISOString(), endDate.toISOString());
       }
+
+      // Ensure tblDeletedSalesOrder exists and query deleted SO codes
+      await db.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedSalesOrder (SOCode VARCHAR(100) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+      const deletedRows = await db.query('SELECT SOCode FROM tblDeletedSalesOrder');
+      const deletedSOCodes = new Set(deletedRows.map((r: any) => String(r.SOCode).trim()));
+
+      // Filter out deleted SOs
+      const beforeCount = sosToSync.length;
+      sosToSync = sosToSync.filter((so: any) => {
+        const code = so.SOCode ? String(so.SOCode).trim() : '';
+        return !deletedSOCodes.has(code);
+      });
+      console.log(`[Sync SO] Filtered out ${beforeCount - sosToSync.length} deleted SOs. ${sosToSync.length} SOs remain for sync.`);
 
       // 1. Gather all unique item codes from SOs and resolve/insert them in parallel batches
       const uniqueItemCodes = new Set<string>();

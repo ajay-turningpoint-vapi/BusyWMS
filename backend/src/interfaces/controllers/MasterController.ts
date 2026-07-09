@@ -18,14 +18,28 @@ export class MasterController {
   }
 
   public static async createWarehouse(req: AuthenticatedRequest, res: Response) {
-    const { code, name, address, companyId } = req.body;
-    if (!code || !name) return res.status(400).json({ message: 'Code and Name are required' });
+    const { name, address, companyId } = req.body;
+    if (!name) return res.status(400).json({ message: 'Name is required' });
     try {
+      // Auto-generate sequential warehouse code (WH001, WH002, ...)
+      const lastCode = await db.query(`
+        SELECT Code FROM tblWarehouse 
+        WHERE Code LIKE 'WH%' 
+        ORDER BY CAST(SUBSTRING(Code, 3) AS UNSIGNED) DESC 
+        LIMIT 1
+      `);
+      let nextNum = 1;
+      if (lastCode.length > 0 && lastCode[0].Code) {
+        const num = parseInt(lastCode[0].Code.replace('WH', ''), 10);
+        if (!isNaN(num)) nextNum = num + 1;
+      }
+      const code = `WH${String(nextNum).padStart(3, '0')}`;
+
       await db.executeCmd(`
         INSERT INTO tblWarehouse (CompanyId, Code, Name, Address, IsActive)
         VALUES (@companyId, @code, @name, @address, 1)
       `, { companyId: companyId || 'COMP01', code, name, address: address || null });
-      return res.status(201).json({ message: 'Warehouse created successfully' });
+      return res.status(201).json({ message: 'Warehouse created successfully', code });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -49,14 +63,28 @@ export class MasterController {
   }
 
   public static async createZone(req: AuthenticatedRequest, res: Response) {
-    const { warehouseId, code, name } = req.body;
-    if (!warehouseId || !code || !name) return res.status(400).json({ message: 'Missing fields' });
+    const { warehouseId, name } = req.body;
+    if (!warehouseId || !name) return res.status(400).json({ message: 'Warehouse and Name are required' });
     try {
+      // Auto-generate sequential zone code (ZN001, ZN002, ...)
+      const lastCode = await db.query(`
+        SELECT Code FROM tblZone 
+        WHERE Code LIKE 'ZN%' 
+        ORDER BY CAST(SUBSTRING(Code, 3) AS UNSIGNED) DESC 
+        LIMIT 1
+      `);
+      let nextNum = 1;
+      if (lastCode.length > 0 && lastCode[0].Code) {
+        const num = parseInt(lastCode[0].Code.replace('ZN', ''), 10);
+        if (!isNaN(num)) nextNum = num + 1;
+      }
+      const code = `ZN${String(nextNum).padStart(3, '0')}`;
+
       await db.executeCmd(`
         INSERT INTO tblZone (WarehouseId, Code, Name, IsActive)
         VALUES (@warehouseId, @code, @name, 1)
       `, { warehouseId, code, name });
-      return res.status(201).json({ message: 'Zone created' });
+      return res.status(201).json({ message: 'Zone created', code });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -101,14 +129,51 @@ export class MasterController {
   }
 
   public static async createBin(req: AuthenticatedRequest, res: Response) {
-    const { shelfId, code, barcode, capacityWeight, capacityVolume } = req.body;
-    if (!shelfId || !code || !barcode) return res.status(400).json({ message: 'Missing fields' });
+    const { shelfId, capacityWeight, capacityVolume } = req.body;
+    if (!shelfId) return res.status(400).json({ message: 'Shelf is required' });
     try {
+      // Fetch parent codes (Warehouse, Zone, Rack, Shelf)
+      const parentInfo = await db.query(`
+        SELECT 
+          w.Code AS WarehouseCode,
+          z.Code AS ZoneCode,
+          r.Code AS RackCode,
+          s.Code AS ShelfCode
+        FROM tblShelf s
+        INNER JOIN tblRack r ON s.RackId = r.RackId
+        INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
+        INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
+        WHERE s.ShelfId = @shelfId
+      `, { shelfId });
+
+      if (parentInfo.length === 0) {
+        return res.status(404).json({ message: 'Shelf or parent hierarchy not found' });
+      }
+
+      const { WarehouseCode, ZoneCode, RackCode, ShelfCode } = parentInfo[0];
+
+      // Auto-generate sequential bin code (BN001, BN002, ...)
+      const lastCode = await db.query(`
+        SELECT Code FROM tblBin 
+        WHERE Code LIKE 'BN%' 
+        ORDER BY CAST(SUBSTRING(Code, 3) AS UNSIGNED) DESC 
+        LIMIT 1
+      `);
+      let nextNum = 1;
+      if (lastCode.length > 0 && lastCode[0].Code) {
+        const num = parseInt(lastCode[0].Code.replace('BN', ''), 10);
+        if (!isNaN(num)) nextNum = num + 1;
+      }
+      const code = `BN${String(nextNum).padStart(3, '0')}`;
+      
+      // Combine parent codes and bin code to form barcode
+      const barcode = `${WarehouseCode}-${ZoneCode}-${RackCode}-${ShelfCode}-${code}`;
+
       await db.executeCmd(`
         INSERT INTO tblBin (ShelfId, Code, Barcode, CapacityWeight, CapacityVolume, OccupiedWeight, OccupiedVolume, IsActive)
         VALUES (@shelfId, @code, @barcode, @capacityWeight, @capacityVolume, 0, 0, 1)
       `, { shelfId, code, barcode, capacityWeight: capacityWeight || 1000, capacityVolume: capacityVolume || 500 });
-      return res.status(201).json({ message: 'Bin created' });
+      return res.status(201).json({ message: 'Bin created', code, barcode });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -181,6 +246,13 @@ export class MasterController {
   public static async createItem(req: AuthenticatedRequest, res: Response) {
     const { code, name, description, category, brand, uom, barcode, trackBatch, trackSerial, minStock, maxStock, weight, volume } = req.body;
     if (!code || !name || !uom) return res.status(400).json({ message: 'Code, Name and UOM are required' });
+    
+    const finalMin = minStock !== undefined && minStock !== null ? Number(minStock) : 1;
+    const finalMax = maxStock !== undefined && maxStock !== null ? Number(maxStock) : 1;
+    if (finalMin > finalMax) {
+      return res.status(400).json({ message: 'Min Stock cannot be greater than Max Stock' });
+    }
+
     try {
       await db.executeCmd(`
         INSERT INTO tblItem (Code, Name, Description, Category, Brand, UOM, Barcode, TrackBatch, TrackSerial, MinStock, MaxStock, Weight, Volume, IsActive)
@@ -188,7 +260,8 @@ export class MasterController {
       `, {
         code, name, description: description || null, category: category || null, brand: brand || null, uom, 
         barcode: barcode || null, trackBatch: trackBatch ? 1 : 0, trackSerial: trackSerial ? 1 : 0, 
-        minStock: minStock || 0, maxStock: maxStock || 999999,
+        minStock: finalMin,
+        maxStock: finalMax,
         weight: weight !== undefined && weight !== null ? Number(weight) : 0.0,
         volume: volume !== undefined && volume !== null ? Number(volume) : 0.0
       });
@@ -218,14 +291,28 @@ export class MasterController {
   }
 
   public static async createRack(req: AuthenticatedRequest, res: Response) {
-    const { zoneId, aisleId, code, name } = req.body;
-    if (!zoneId || !code || !name) return res.status(400).json({ message: 'Missing fields' });
+    const { zoneId, aisleId, name } = req.body;
+    if (!zoneId || !name) return res.status(400).json({ message: 'Zone and Name are required' });
     try {
+      // Auto-generate sequential rack code (RK001, RK002, ...)
+      const lastCode = await db.query(`
+        SELECT Code FROM tblRack 
+        WHERE Code LIKE 'RK%' 
+        ORDER BY CAST(SUBSTRING(Code, 3) AS UNSIGNED) DESC 
+        LIMIT 1
+      `);
+      let nextNum = 1;
+      if (lastCode.length > 0 && lastCode[0].Code) {
+        const num = parseInt(lastCode[0].Code.replace('RK', ''), 10);
+        if (!isNaN(num)) nextNum = num + 1;
+      }
+      const code = `RK${String(nextNum).padStart(3, '0')}`;
+
       await db.executeCmd(`
         INSERT INTO tblRack (ZoneId, AisleId, Code, Name, IsActive)
         VALUES (@zoneId, @aisleId, @code, @name, 1)
       `, { zoneId, aisleId: aisleId || null, code, name });
-      return res.status(201).json({ message: 'Rack created' });
+      return res.status(201).json({ message: 'Rack created', code });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -247,14 +334,28 @@ export class MasterController {
   }
 
   public static async createShelf(req: AuthenticatedRequest, res: Response) {
-    const { rackId, code, name } = req.body;
-    if (!rackId || !code || !name) return res.status(400).json({ message: 'Missing fields' });
+    const { rackId, name } = req.body;
+    if (!rackId || !name) return res.status(400).json({ message: 'Rack and Name are required' });
     try {
+      // Auto-generate sequential shelf code (SH001, SH002, ...)
+      const lastCode = await db.query(`
+        SELECT Code FROM tblShelf 
+        WHERE Code LIKE 'SH%' 
+        ORDER BY CAST(SUBSTRING(Code, 3) AS UNSIGNED) DESC 
+        LIMIT 1
+      `);
+      let nextNum = 1;
+      if (lastCode.length > 0 && lastCode[0].Code) {
+        const num = parseInt(lastCode[0].Code.replace('SH', ''), 10);
+        if (!isNaN(num)) nextNum = num + 1;
+      }
+      const code = `SH${String(nextNum).padStart(3, '0')}`;
+
       await db.executeCmd(`
         INSERT INTO tblShelf (RackId, Code, Name, IsActive)
         VALUES (@rackId, @code, @name, 1)
       `, { rackId, code, name });
-      return res.status(201).json({ message: 'Shelf created' });
+      return res.status(201).json({ message: 'Shelf created', code });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -562,6 +663,13 @@ export class MasterController {
       trackBatch, trackSerial, minStock, maxStock, unitCost, sellingPrice, weight, volume, isActive 
     } = req.body;
     if (!code || !name || !uom) return res.status(400).json({ message: 'Code, Name and UOM are required' });
+
+    const finalMin = minStock !== undefined && minStock !== null ? Number(minStock) : 1;
+    const finalMax = maxStock !== undefined && maxStock !== null ? Number(maxStock) : 1;
+    if (finalMin > finalMax) {
+      return res.status(400).json({ message: 'Min Stock cannot be greater than Max Stock' });
+    }
+
     try {
       const activeVal = isActive === false ? 0 : 1;
       const result = await db.executeCmd(`
@@ -577,7 +685,8 @@ export class MasterController {
       `, {
         code, name, description: description || null, category: category || null, brand: brand || null, uom, 
         barcode: barcode || null, trackBatch: trackBatch ? 1 : 0, trackSerial: trackSerial ? 1 : 0, 
-        minStock: minStock || 0, maxStock: maxStock || 999999,
+        minStock: finalMin,
+        maxStock: finalMax,
         unitCost: unitCost || 0.0, sellingPrice: sellingPrice || 0.0,
         weight: weight !== undefined && weight !== null ? Number(weight) : 0.0,
         volume: volume !== undefined && volume !== null ? Number(volume) : 0.0,
@@ -614,6 +723,14 @@ export class MasterController {
       const sos = await db.query('SELECT COUNT(*) AS count FROM tblSalesOrderDetail WHERE ItemId = @id', { id });
       if (sos[0].count > 0) {
         return res.status(400).json({ message: 'Cannot delete item because it is referenced in Sales Orders.' });
+      }
+
+      // Track deleted item code to prevent sync from re-importing it
+      const itemRow = await db.query('SELECT Code FROM tblItem WHERE ItemId = @id', { id });
+      if (itemRow.length > 0 && itemRow[0].Code) {
+        const itemCode = itemRow[0].Code;
+        await db.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedItem (Code VARCHAR(50) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+        await db.executeCmd('INSERT IGNORE INTO tblDeletedItem (Code) VALUES (@itemCode)', { itemCode });
       }
 
       const result = await db.executeCmd('DELETE FROM tblItem WHERE ItemId = @id', { id });
@@ -924,7 +1041,18 @@ export class MasterController {
   public static async deleteCustomer(req: AuthenticatedRequest, res: Response) {
     const { id } = req.params;
     try {
-      await db.executeCmd('DELETE FROM tblCustomer WHERE CustomerId = @id', { id });
+      // Track deleted customer code to prevent sync from re-importing it
+      const row = await db.query('SELECT Code FROM tblCustomer WHERE CustomerId = @id', { id });
+      if (row.length > 0 && row[0].Code) {
+        const custCode = row[0].Code;
+        await db.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedCustomer (Code VARCHAR(50) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+        await db.executeCmd('INSERT IGNORE INTO tblDeletedCustomer (Code) VALUES (@custCode)', { custCode });
+      }
+
+      const result = await db.executeCmd('DELETE FROM tblCustomer WHERE CustomerId = @id', { id });
+      if (result.rowsAffected === 0) {
+        return res.status(404).json({ message: 'Customer not found' });
+      }
       return res.json({ message: 'Customer deleted successfully' });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
@@ -967,7 +1095,18 @@ export class MasterController {
   public static async deleteSupplier(req: AuthenticatedRequest, res: Response) {
     const { id } = req.params;
     try {
-      await db.executeCmd('DELETE FROM tblSupplier WHERE SupplierId = @id', { id });
+      // Track deleted supplier code to prevent sync from re-importing it
+      const row = await db.query('SELECT Code FROM tblSupplier WHERE SupplierId = @id', { id });
+      if (row.length > 0 && row[0].Code) {
+        const suppCode = row[0].Code;
+        await db.executeCmd('CREATE TABLE IF NOT EXISTS tblDeletedSupplier (Code VARCHAR(50) PRIMARY KEY, DeletedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)');
+        await db.executeCmd('INSERT IGNORE INTO tblDeletedSupplier (Code) VALUES (@suppCode)', { suppCode });
+      }
+
+      const result = await db.executeCmd('DELETE FROM tblSupplier WHERE SupplierId = @id', { id });
+      if (result.rowsAffected === 0) {
+        return res.status(404).json({ message: 'Supplier not found' });
+      }
       return res.json({ message: 'Supplier deleted successfully' });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });

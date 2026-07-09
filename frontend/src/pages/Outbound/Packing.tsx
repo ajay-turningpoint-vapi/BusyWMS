@@ -12,8 +12,10 @@ import SearchBar from '../../components/SearchBar';
 import TablePaginationBar, { usePagination } from '../../components/TablePaginationBar';
 import { exportToCSV } from '../../utils/exportCSV';
 import { useToast } from '../../contexts/ToastContext';
+import { useAuthStore } from '../../store/authStore';
 
 export default function Packing() {
+  const { user } = useAuthStore();
   const [pickLists, setPickLists] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -30,6 +32,17 @@ export default function Packing() {
   const [palletNo, setPalletNo] = useState('');
   const [shippingLabel, setShippingLabel] = useState('');
   const [printOpen, setPrintOpen] = useState(false);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
+
+  // Fetch warehouses on mount
+  useEffect(() => {
+    api.get('/masters/warehouses')
+      .then(res => setWarehouses(res.data))
+      .catch(err => console.error(err));
+  }, []);
+
+  const currentWarehouse = warehouses.find(w => String(w.WarehouseId) === String(user?.warehouseId));
+  const currentWarehouseName = currentWarehouse ? currentWarehouse.Name : 'Delhi Main Warehouse';
 
   const loadData = async () => {
     setLoading(true);
@@ -183,28 +196,30 @@ export default function Packing() {
       {/* Packing Specification Modal */}
       <Dialog open={!!activeList} onClose={() => setActiveList(null)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ fontWeight: 700 }}>Record Packaging details</DialogTitle>
-        <DialogContent sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <TextField 
-            label="Carton Number" 
-            fullWidth 
-            size="small" 
-            value={cartonNo} 
-            onChange={(e) => setCartonNo(e.target.value)} 
-          />
-          <TextField 
-            label="Pallet Reference (Optional)" 
-            fullWidth 
-            size="small" 
-            value={palletNo} 
-            onChange={(e) => setPalletNo(e.target.value)} 
-          />
-          <TextField 
-            label="Shipping Label Tracking Code" 
-            fullWidth 
-            size="small" 
-            value={shippingLabel} 
-            onChange={(e) => setShippingLabel(e.target.value)} 
-          />
+        <DialogContent>
+          <Box sx={{ pt: 1.5, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+            <TextField 
+              label="Carton Number" 
+              fullWidth 
+              size="small" 
+              value={cartonNo} 
+              onChange={(e) => setCartonNo(e.target.value)} 
+            />
+            <TextField 
+              label="Pallet Reference (Optional)" 
+              fullWidth 
+              size="small" 
+              value={palletNo} 
+              onChange={(e) => setPalletNo(e.target.value)} 
+            />
+            <TextField 
+              label="Shipping Label Tracking Code" 
+              fullWidth 
+              size="small" 
+              value={shippingLabel} 
+              onChange={(e) => setShippingLabel(e.target.value)} 
+            />
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setActiveList(null)}>Cancel</Button>
@@ -220,7 +235,7 @@ export default function Packing() {
             <Typography variant="h4" sx={{ fontWeight: 800, textAlign: 'center', borderBottom: '2px solid #000', pb: 1, mb: 1 }}>
               SHIPPING LABEL
             </Typography>
-            <Typography variant="body2" sx={{ mb: 0.5 }}>FROM: Delhi Main Warehouse</Typography>
+            <Typography variant="body2" sx={{ mb: 0.5 }}>FROM: {currentWarehouseName}</Typography>
             <Typography variant="body2" sx={{ mb: 1 }}>TO: Apex Tech Solutions, Noida</Typography>
             
             <Divider sx={{ bgcolor: '#000', height: 2, my: 1 }} />

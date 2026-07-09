@@ -184,35 +184,37 @@ export default function Dispatch() {
       {/* Dispatch Gate Out Details Modal */}
       <Dialog open={!!activeSO} onClose={() => setActiveSO(null)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ fontWeight: 700 }}>Dispatch Gate-Out Challan</DialogTitle>
-        <DialogContent sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <TextField 
-            label="Delivery Challan No" 
-            fullWidth 
-            size="small" 
-            value={dcNo} 
-            onChange={(e) => setDcNo(e.target.value)} 
-          />
-          <TextField 
-            label="Carrier / Transporter Name" 
-            fullWidth 
-            size="small" 
-            value={carrier} 
-            onChange={(e) => setCarrier(e.target.value)} 
-          />
-          <TextField 
-            label="Vehicle Registration Number" 
-            fullWidth 
-            size="small" 
-            value={vehicleNo} 
-            onChange={(e) => setVehicleNo(e.target.value)} 
-          />
-          <TextField 
-            label="LR (Lorry Receipt) Number" 
-            fullWidth 
-            size="small" 
-            value={lrNo} 
-            onChange={(e) => setLrNo(e.target.value)} 
-          />
+        <DialogContent>
+          <Box sx={{ pt: 1.5, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+            <TextField 
+              label="Delivery Challan No" 
+              fullWidth 
+              size="small" 
+              value={dcNo} 
+              onChange={(e) => setDcNo(e.target.value)} 
+            />
+            <TextField 
+              label="Carrier / Transporter Name" 
+              fullWidth 
+              size="small" 
+              value={carrier} 
+              onChange={(e) => setCarrier(e.target.value)} 
+            />
+            <TextField 
+              label="Vehicle Registration Number" 
+              fullWidth 
+              size="small" 
+              value={vehicleNo} 
+              onChange={(e) => setVehicleNo(e.target.value)} 
+            />
+            <TextField 
+              label="LR (Lorry Receipt) Number" 
+              fullWidth 
+              size="small" 
+              value={lrNo} 
+              onChange={(e) => setLrNo(e.target.value)} 
+            />
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setActiveSO(null)}>Cancel</Button>

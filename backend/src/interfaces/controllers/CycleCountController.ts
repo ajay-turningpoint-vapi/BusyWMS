@@ -180,8 +180,8 @@ export class CycleCountController {
         if (variance !== 0) {
           // Fetch Item weight/volume details
           const items = await db.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId: line.ItemId });
-          const itemWeight = items.length > 0 && items[0].Weight !== null ? Number(items[0].Weight) : 2.0;
-          const itemVolume = items.length > 0 && items[0].Volume !== null ? Number(items[0].Volume) : 1.5;
+          const itemWeight = items.length > 0 && items[0].Weight !== null && Number(items[0].Weight) > 0 ? Number(items[0].Weight) : 2.0;
+          const itemVolume = items.length > 0 && items[0].Volume !== null && Number(items[0].Volume) > 0 ? Number(items[0].Volume) : 1.5;
 
           const weightDelta = variance * itemWeight;
           const volumeDelta = variance * itemVolume;
