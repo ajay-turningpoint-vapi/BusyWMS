@@ -545,11 +545,16 @@ export default function Masters() {
         { key: 'Alias', header: 'Alias' },
         { key: 'HSNCode', header: 'HSN Code' },
         { key: 'Category', header: 'Item Group' },
+        { key: 'PurchPrice', header: 'Purchase Price' },
+        { key: 'PurchDiscount', header: 'Purchase Discount' },
         { key: 'AltSalePrice', header: 'Sale Price' },
+        { key: 'AltPurchPrice', header: 'Alt Purchase Price' },
         { key: 'MRP', header: 'MRP' },
         { key: 'SaleDiscount', header: 'Sale Discount' },
         { key: 'MainUnit', header: 'Main Unit' },
-        { key: 'AltUnit', header: 'Alt Unit' }
+        { key: 'AltUnit', header: 'Alt Unit' },
+        { key: 'Vendor', header: 'Vendor' },
+        { key: 'Tax', header: 'Tax' }
       ];
     } else if (tabValue === 6) {
       headers = [
@@ -738,22 +743,21 @@ export default function Masters() {
                       <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
                     </>
                   )}
-                  {tabValue === 5 && (
-                    <>
-                      <TableCell sx={{ fontWeight: 600 }}>Item ID</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Item Code</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Alias</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>HSN Code</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Item Group</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Sale Price</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>MRP</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Sale Discount</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Main Unit</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Alt Unit</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Weight / Vol</TableCell>
-                    </>
-                  )}
+                   {tabValue === 5 && (
+                     <>
+                       <TableCell sx={{ fontWeight: 600 }}>Item ID</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>Item Code</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>HSN Code</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>Item Group</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>Sale Price</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>MRP</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>Sale Discount</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>Main Unit</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>Alt Unit</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>Weight / Vol</TableCell>
+                     </>
+                   )}
                   {tabValue === 6 && (
                     <>
                       <TableCell sx={{ fontWeight: 600 }}>Customer ID</TableCell>
@@ -803,10 +807,10 @@ export default function Masters() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {tabValue === 5 ? (
+                 {tabValue === 5 ? (
                   itemsLoading ? (
                     <TableRow>
-                      <TableCell colSpan={15} align="center" sx={{ py: 5 }}>
+                      <TableCell colSpan={14} align="center" sx={{ py: 5 }}>
                         <CircularProgress size={24} />
                       </TableCell>
                     </TableRow>
@@ -816,7 +820,6 @@ export default function Masters() {
                         <TableCell>{row.ItemId}</TableCell>
                         <TableCell sx={{ fontWeight: 600 }}>{row.Name}</TableCell>
                         <TableCell><code>{row.Code}</code></TableCell>
-                        <TableCell>{row.Alias || 'N/A'}</TableCell>
                         <TableCell>{row.HSNCode || 'N/A'}</TableCell>
                         <TableCell>{row.Category || 'General'}</TableCell>
                         <TableCell>₹{parseFloat(row.AltSalePrice || 0).toFixed(2)}</TableCell>

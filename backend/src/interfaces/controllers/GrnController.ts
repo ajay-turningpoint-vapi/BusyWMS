@@ -257,12 +257,12 @@ export class GrnController {
         params.status = status;
       }
       if (startDate) {
-        whereClause += ' AND po.OrderDate >= @startDate';
+        whereClause += ' AND DATE(po.OrderDate) >= @startDate';
         params.startDate = startDate;
       }
       if (endDate) {
-        whereClause += ' AND po.OrderDate <= @endDate';
-        params.endDate = endDate + ' 23:59:59';
+        whereClause += ' AND DATE(po.OrderDate) <= @endDate';
+        params.endDate = endDate;
       }
 
       const isPaginated = req.query.page !== undefined;

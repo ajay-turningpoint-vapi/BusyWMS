@@ -778,6 +778,7 @@ export default function Reports() {
                   size="small"
                   fullWidth
                   InputLabelProps={{ shrink: true }}
+                  inputProps={{ max: new Date().toISOString().split('T')[0] }}
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                   InputProps={{
@@ -796,8 +797,10 @@ export default function Reports() {
                   size="small"
                   fullWidth
                   InputLabelProps={{ shrink: true }}
+                  inputProps={{ max: new Date().toISOString().split('T')[0], min: startDate }}
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
+                  disabled={!startDate}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">

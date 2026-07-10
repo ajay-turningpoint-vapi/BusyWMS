@@ -3,9 +3,10 @@ import {
   Box, Typography, Button, Card, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, CircularProgress, Alert, 
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, 
-  Chip, List, ListItem, ListItemText, Divider, FormControl, InputLabel, Select, MenuItem
+  Chip, List, ListItem, ListItemText, Divider, FormControl, InputLabel, Select, MenuItem, IconButton,
+  Stepper, Step, StepLabel, StepContent
 } from '@mui/material';
-import { Play, Clipboard, CheckSquare, ListPlus, FileDown } from 'lucide-react';
+import { Play, Clipboard, CheckSquare, ListPlus, FileDown, MapPin } from 'lucide-react';
 import api from '../../services/api';
 import TransactionLink from '../../components/TransactionLink';
 import SearchBar from '../../components/SearchBar';
@@ -36,6 +37,14 @@ export default function Picking() {
   // Pick confirmation quantities
   const [pickedQtys, setPickedQtys] = useState<Record<number, number>>({});
   const [scannedBarcodes, setScannedBarcodes] = useState<Record<number, string>>({});
+
+  const [locatorOpen, setLocatorOpen] = useState(false);
+  const [locatorTarget, setLocatorTarget] = useState<any>(null);
+
+  const handleLocateBin = (line: any) => {
+    setLocatorTarget(line);
+    setLocatorOpen(true);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -325,7 +334,20 @@ export default function Picking() {
                       const max = line.Quantity - line.PickedQty;
                       return (
                         <TableRow key={line.PickDetailId} hover>
-                          <TableCell sx={{ fontWeight: 700, color: 'primary.main' }}><code>{line.BinCode}</code></TableCell>
+                          <TableCell sx={{ fontWeight: 700, color: 'primary.main' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <code>{line.BinCode}</code>
+                              <IconButton 
+                                size="small" 
+                                color="primary" 
+                                title="Locate Bin"
+                                onClick={() => handleLocateBin(line)}
+                                sx={{ p: 0.25 }}
+                              >
+                                <MapPin size={13} />
+                              </IconButton>
+                            </Box>
+                          </TableCell>
                           <TableCell>
                             <Typography variant="body2" sx={{ fontWeight: 500 }}>{line.ZoneCode || 'N/A'}</Typography>
                             <Typography variant="caption" color="text.secondary">{line.RackName || line.RackCode || 'N/A'}</Typography>
@@ -366,6 +388,77 @@ export default function Picking() {
         <DialogActions>
           <Button onClick={() => setActivePickList(null)}>Cancel</Button>
           <Button variant="contained" onClick={handleSubmitPicking}>Confirm Pick Completion</Button>
+        </DialogActions>
+      </Dialog>
+      {/* Dialog 3: Visual Bin Locator Map */}
+      <Dialog open={locatorOpen} onClose={() => setLocatorOpen(false)} fullWidth maxWidth="xs">
+        <style>{`
+          @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0.5); }
+            70% { box-shadow: 0 0 0 12px rgba(26, 115, 232, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0); }
+          }
+        `}</style>
+        <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <MapPin size={22} color="#1a73e8" />
+          Visual Bin Locator: {locatorTarget?.BinCode}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ bgcolor: 'background.paper', p: 3, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 3 }}>Location Path Finder</Typography>
+            <Stepper orientation="vertical" activeStep={4} sx={{
+              '& .MuiStepConnector-line': {
+                borderColor: 'primary.main',
+                borderWidth: 2
+              }
+            }}>
+              <Step completed>
+                <StepLabel>
+                  <Typography variant="body1" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                    Zone: {locatorTarget?.ZoneName || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    Code: {locatorTarget?.ZoneCode || 'N/A'}
+                  </Typography>
+                </StepLabel>
+              </Step>
+              <Step completed>
+                <StepLabel>
+                  <Typography variant="body1" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                    Rack: {locatorTarget?.RackName || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    Code: {locatorTarget?.RackCode || 'N/A'}
+                  </Typography>
+                </StepLabel>
+              </Step>
+              <Step completed>
+                <StepLabel>
+                  <Typography variant="body1" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                    Shelf: {locatorTarget?.ShelfName || locatorTarget?.ShelfCode || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    Code: {locatorTarget?.ShelfCode || 'N/A'}
+                  </Typography>
+                </StepLabel>
+              </Step>
+              <Step completed>
+                <StepLabel>
+                  <Typography variant="body1" sx={{ fontWeight: 700, color: 'success.main' }}>
+                    Bin Label: {locatorTarget?.BinCode || 'N/A'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                    Barcode to Scan: <strong>{locatorTarget?.BinBarcode || 'N/A'}</strong>
+                  </Typography>
+                </StepLabel>
+              </Step>
+            </Stepper>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button variant="contained" onClick={() => setLocatorOpen(false)} sx={{ fontWeight: 600 }}>
+            Got It, Proceed
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

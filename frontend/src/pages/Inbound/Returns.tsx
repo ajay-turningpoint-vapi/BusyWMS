@@ -4,7 +4,7 @@ import {
   TableContainer, TableHead, TableRow, Dialog, DialogTitle, 
   DialogContent, DialogActions, TextField, FormControl, 
   InputLabel, Select, MenuItem, Chip, Alert, CircularProgress, 
-  Grid, RadioGroup, FormControlLabel, Radio
+  Grid, RadioGroup, FormControlLabel, Radio, Autocomplete, Checkbox
 } from '@mui/material';
 import { Plus, CheckSquare, Eye, RotateCw, FileDown } from 'lucide-react';
 import api from '../../services/api';
@@ -33,15 +33,29 @@ export default function Returns() {
   const [qcDialogOpen, setQcDialogOpen] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<any>(null);
 
+  // Order Details Auto-Fetch States
+  const [orderItems, setOrderItems] = useState<any[]>([]);
+  const [loadingOrderDetails, setLoadingOrderDetails] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<{
+    [itemId: number]: {
+      checked: boolean;
+      quantity: number;
+      binId: string;
+      binCode: string;
+      batchId: string;
+      reason: string;
+      maxQty: number;
+      itemCode: string;
+      itemName: string;
+      uom: string;
+    }
+  }>({});
+
   // Form states
   const [newReturn, setNewReturn] = useState({
     type: 'CUSTOMER',
     referenceCode: '',
-    itemId: '',
-    batchId: '',
-    quantity: 1,
-    reason: '',
-    binId: ''
+    reason: ''
   });
 
   const [qcForm, setQcForm] = useState({
@@ -67,32 +81,112 @@ export default function Returns() {
     }
   };
 
+  const fetchOrderDetails = async (type: string, code: string) => {
+    if (!code) {
+      setOrderItems([]);
+      setSelectedItems({});
+      return;
+    }
+    setLoadingOrderDetails(true);
+    try {
+      const res = await api.get(`/inventory/returns/order-details?type=${type}&code=${encodeURIComponent(code)}`);
+      setOrderItems(res.data);
+      
+      const itemsMap: typeof selectedItems = {};
+      res.data.forEach((oi: any) => {
+        itemsMap[oi.ItemId] = {
+          checked: false,
+          quantity: oi.Quantity ? Math.ceil(parseFloat(oi.Quantity)) : 1,
+          binId: oi.BinId ? String(oi.BinId) : '',
+          binCode: oi.BinCode ? String(oi.BinCode) : '',
+          batchId: oi.BatchId ? String(oi.BatchId) : '',
+          reason: '',
+          maxQty: oi.Quantity ? Math.ceil(parseFloat(oi.Quantity)) : 1,
+          itemCode: oi.ItemCode,
+          itemName: oi.ItemName,
+          uom: oi.UOM
+        };
+      });
+      setSelectedItems(itemsMap);
+
+      if (res.data.length === 0) {
+        toast.showError('No matching active order details found.');
+      } else {
+        toast.showSuccess(`Loaded ${res.data.length} line items from order ${code}`);
+      }
+    } catch (err) {
+      console.error('Failed to fetch order details:', err);
+      setOrderItems([]);
+      setSelectedItems({});
+    } finally {
+      setLoadingOrderDetails(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, []);
 
   const handleReceiveOpen = () => {
+    setOrderItems([]);
+    setSelectedItems({});
     setNewReturn({
       type: 'CUSTOMER',
       referenceCode: '',
-      itemId: '',
-      batchId: '',
-      quantity: 1,
-      reason: '',
-      binId: ''
+      reason: ''
     });
     setReceiveDialogOpen(true);
   };
 
   const handleReceiveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newReturn.itemId || !newReturn.binId || newReturn.quantity <= 0) {
-      setError('Item, Bin and Quantity are required.');
+    setError('');
+
+    const checkedLines = Object.keys(selectedItems)
+      .map(key => Number(key))
+      .filter(itemId => selectedItems[itemId].checked)
+      .map(itemId => {
+        const line = selectedItems[itemId];
+        return {
+          itemId: itemId,
+          batchId: line.batchId ? Number(line.batchId) : null,
+          quantity: line.quantity,
+          binId: Number(line.binId),
+          reason: newReturn.reason || line.reason || null
+        };
+      });
+
+    if (checkedLines.length === 0) {
+      setError('Please select at least one item to return.');
       return;
     }
 
+    // Validate quantities
+    for (const line of checkedLines) {
+      const original = selectedItems[line.itemId];
+      if (line.quantity <= 0) {
+        setError(`Quantity for item ${original.itemName} must be greater than zero.`);
+        return;
+      }
+      if (line.quantity > original.maxQty) {
+        setError(`Quantity for item ${original.itemName} cannot exceed original quantity of ${original.maxQty}.`);
+        return;
+      }
+      if (!line.binId) {
+        setError(`Please select a valid receiving bin for item ${original.itemName}.`);
+        return;
+      }
+    }
+
     try {
-      await api.post('/inventory/returns/receive', newReturn);
+      const payload = {
+        type: newReturn.type,
+        referenceCode: newReturn.referenceCode,
+        reason: newReturn.reason,
+        items: checkedLines
+      };
+
+      await api.post('/inventory/returns/receive', payload);
       setSuccess('Returned stock received. Pending Quality Control inspection.');
       setReceiveDialogOpen(false);
       loadData();
@@ -134,6 +228,8 @@ export default function Returns() {
     if (status === 'REJECTED') return <Chip label="Rejected (Quarantined)" color="error" size="small" sx={{ fontWeight: 600 }} />;
     return <Chip label="Received (Pending QC)" color="warning" size="small" sx={{ fontWeight: 600 }} />;
   };
+
+  const isOrderLoaded = orderItems.length > 0;
 
   const filteredReturns = useMemo(() => {
     let data = returns;
@@ -274,65 +370,120 @@ export default function Returns() {
                 <RadioGroup
                   row
                   value={newReturn.type}
-                  onChange={(e) => setNewReturn({ ...newReturn, type: e.target.value })}
+                  onChange={(e) => {
+                    setOrderItems([]);
+                    setNewReturn({ 
+                      ...newReturn, 
+                      type: e.target.value,
+                      referenceCode: ''
+                    });
+                  }}
                 >
-                  <FormControlLabel value="CUSTOMER" control={<Radio />} label="Customer Return" />
-                  <FormControlLabel value="VENDOR" control={<Radio />} label="Vendor Return / RTO" />
+                  <FormControlLabel value="CUSTOMER" control={<Radio />} label="Customer Return (SO)" />
+                  <FormControlLabel value="VENDOR" control={<Radio />} label="Vendor Return / RTO (PO)" />
                 </RadioGroup>
               </FormControl>
 
               <TextField
-                label="Reference Invoice / Order No."
+                label={newReturn.type === 'CUSTOMER' ? "Sales Order Code" : "Purchase Order Code"}
                 size="small"
                 fullWidth
+                required
                 value={newReturn.referenceCode}
                 onChange={(e) => setNewReturn({ ...newReturn, referenceCode: e.target.value })}
+                onBlur={() => fetchOrderDetails(newReturn.type, newReturn.referenceCode)}
+                helperText="Press Enter or tab outside to fetch order items"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    fetchOrderDetails(newReturn.type, newReturn.referenceCode);
+                  }
+                }}
               />
 
-              <FormControl fullWidth size="small" required>
-                <InputLabel>Returned Item</InputLabel>
-                <Select
-                  value={newReturn.itemId}
-                  label="Returned Item"
-                  onChange={(e) => setNewReturn({ ...newReturn, itemId: e.target.value })}
-                >
-                  {items.map(i => <MenuItem key={i.ItemId} value={i.ItemId}>{i.Name} ({i.Code})</MenuItem>)}
-                </Select>
-              </FormControl>
-
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <TextField
-                    label="Returned Qty"
-                    type="number"
-                    size="small"
-                    required
-                    fullWidth
-                    value={newReturn.quantity}
-                    onChange={(e) => setNewReturn({ ...newReturn, quantity: Number(e.target.value) })}
-                    inputProps={{ min: 1 }}
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <FormControl fullWidth size="small" required>
-                    <InputLabel>Receiving Bin (Dock)</InputLabel>
-                    <Select
-                      value={newReturn.binId}
-                      label="Receiving Bin (Dock)"
-                      onChange={(e) => setNewReturn({ ...newReturn, binId: e.target.value })}
-                    >
-                      {bins.map(b => <MenuItem key={b.BinId} value={b.BinId}>{b.Code}</MenuItem>)}
-                    </Select>
-                  </FormControl>
-                </Grid>
-              </Grid>
+              {isOrderLoaded ? (
+                <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, mt: 1, maxHeight: 280 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 600, width: 50, bgcolor: 'action.hover' }}>Select</TableCell>
+                        <TableCell sx={{ fontWeight: 600, bgcolor: 'action.hover' }}>Item</TableCell>
+                        <TableCell sx={{ fontWeight: 600, width: 110, bgcolor: 'action.hover' }}>Qty</TableCell>
+                        <TableCell sx={{ fontWeight: 600, width: 160, bgcolor: 'action.hover' }}>Return Bin</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {Object.keys(selectedItems).map((key) => {
+                        const itemId = Number(key);
+                        const line = selectedItems[itemId];
+                        return (
+                          <TableRow key={itemId} hover>
+                            <TableCell>
+                              <Checkbox
+                                size="small"
+                                checked={line.checked}
+                                disabled={!line.binId}
+                                onChange={(e) => setSelectedItems({
+                                  ...selectedItems,
+                                  [itemId]: { ...line, checked: e.target.checked }
+                                })}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.825rem', color: !line.binId ? 'text.secondary' : 'inherit' }}>
+                                {line.itemName}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '0.7rem' }}>
+                                {line.itemCode} • Max: {line.maxQty} {line.uom}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                type="number"
+                                size="small"
+                                disabled={!line.checked}
+                                value={line.quantity}
+                                onChange={(e) => {
+                                  const val = Math.min(line.maxQty, Math.max(1, Number(e.target.value)));
+                                  setSelectedItems({
+                                    ...selectedItems,
+                                    [itemId]: { ...line, quantity: val }
+                                  });
+                                }}
+                                inputProps={{ min: 1, max: line.maxQty }}
+                                variant="standard"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {line.binId ? (
+                                <Typography variant="body2" sx={{ fontWeight: 600, color: 'success.main' }}>
+                                  {line.binCode}
+                                </Typography>
+                              ) : (
+                                <Typography variant="caption" sx={{ fontWeight: 600, color: 'error.main' }}>
+                                  Not in Bin (Blocked)
+                                </Typography>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Alert severity="info" sx={{ mt: 1 }}>
+                  Please enter a valid Order Code and trigger lookup to display and select items for return.
+                </Alert>
+              )}
 
               <TextField
-                label="Return Reason / Remarks"
+                label="Return Reason / Remarks (General)"
                 multiline
                 rows={2}
                 fullWidth
                 size="small"
+                disabled={!Object.values(selectedItems).some(l => l.checked)}
                 value={newReturn.reason}
                 onChange={(e) => setNewReturn({ ...newReturn, reason: e.target.value })}
               />

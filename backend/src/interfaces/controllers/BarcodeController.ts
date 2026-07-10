@@ -121,7 +121,7 @@ export class BarcodeController {
 
     try {
       const items = await db.query(`
-        SELECT ItemId, Code, Name, UOM, Barcode, TrackBatch, TrackSerial, UnitCost, SellingPrice
+        SELECT ItemId, Code, Name, UOM, Barcode, TrackBatch, TrackSerial, UnitCost, SellingPrice, MRP
         FROM tblItem
         WHERE Code = @itemCode OR Barcode = @itemCode
       `, { itemCode });
@@ -137,7 +137,7 @@ export class BarcodeController {
         uom: item.UOM,
         barcodeNumber: item.Barcode || item.Code,
         sku: item.Code,
-        mrp: item.UnitCost ? Number(item.UnitCost).toFixed(2) : '0.00',
+        mrp: item.MRP ? Number(item.MRP).toFixed(2) : (item.UnitCost ? Number(item.UnitCost).toFixed(2) : '0.00'),
         salePrice: item.SellingPrice ? Number(item.SellingPrice).toFixed(2) : '0.00',
         mfgDate: '',
         expiryDate: '',

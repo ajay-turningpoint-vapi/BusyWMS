@@ -49,7 +49,7 @@ export class SyncController {
 
       console.log('Fetching suppliers from MSSQL ERP...');
       const result = await pool.request().query(query);
-      let erpSuppliers = result.recordset;
+      let erpSuppliers: any[] = result.recordset;
       console.log(`Fetched ${erpSuppliers.length} suppliers from MSSQL ERP.`);
 
       // Ensure tblDeletedSupplier exists and query deleted codes
@@ -168,7 +168,7 @@ export class SyncController {
 
       console.log('Fetching customers from MSSQL ERP...');
       const result = await pool.request().query(query);
-      let erpCustomers = result.recordset;
+      let erpCustomers: any[] = result.recordset;
       console.log(`Fetched ${erpCustomers.length} customers from MSSQL ERP.`);
 
       // Ensure tblDeletedCustomer exists and query deleted codes
@@ -266,13 +266,15 @@ export class SyncController {
           CODE, name, alias, HSNCODE,
           (SELECT NAME FROM MASTER1 M WHERE M.CODE=MASTER1.ParentGrp) AS ITEM_GRP,
           d4 as purch_price,
-          d21 as alt_sale_price,
-          D3 AS MRP,
+          d17 as purch_dis,
+          d3 as alt_sale_price,
+          d22 as alt_purch_price,
+          D2 AS MRP,
           D16 AS SALE_DIS,
           (SELECT NAME FROM MASTER1 m  WHERE m.CODE=MASTER1.CM1) AS MAINUNIT,
           (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM2) AS ALTUNIT,
           (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM9) AS vndor,
-          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.B16) AS tax
+          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM8) AS tax
         FROM master1 
         WHERE mastertype=6
         ORDER BY alias
@@ -280,7 +282,7 @@ export class SyncController {
 
       console.log('Fetching items from MSSQL ERP...');
       const result = await pool.request().query(query);
-      let erpItems = result.recordset;
+      let erpItems: any[] = result.recordset;
       console.log(`Fetched ${erpItems.length} items from MSSQL ERP.`);
 
       // Ensure tblDeletedItem exists and query deleted codes
@@ -310,7 +312,9 @@ export class SyncController {
           const hsnCode = row.HSNCODE ? String(row.HSNCODE).trim() : null;
           const category = row.ITEM_GRP ? String(row.ITEM_GRP).trim() : 'General';
           const purchPrice = row.purch_price !== null && row.purch_price !== undefined ? Number(row.purch_price) : 0.0;
+          const purchDiscount = row.purch_dis !== null && row.purch_dis !== undefined ? Number(row.purch_dis) : 0.0;
           const altSalePrice = row.alt_sale_price !== null && row.alt_sale_price !== undefined ? Number(row.alt_sale_price) : 0.0;
+          const altPurchPrice = row.alt_purch_price !== null && row.alt_purch_price !== undefined ? Number(row.alt_purch_price) : 0.0;
           const mrp = row.MRP !== null && row.MRP !== undefined ? Number(row.MRP) : 0.0;
           const saleDiscount = row.SALE_DIS !== null && row.SALE_DIS !== undefined ? Number(row.SALE_DIS) : 0.0;
           const mainUnit = row.MAINUNIT ? String(row.MAINUNIT).trim() : null;
@@ -320,7 +324,7 @@ export class SyncController {
 
           return [
             code, alias, name, uom, hsnCode, category,
-            purchPrice, altSalePrice,
+            purchPrice, purchDiscount, altSalePrice, altPurchPrice,
             mrp, saleDiscount, mainUnit, altUnit, vendor, tax, 1
           ];
         }).filter(item => item[0] !== ''); // exclude items with empty code
@@ -330,7 +334,7 @@ export class SyncController {
           await db.query(`
             INSERT INTO tblItem (
               Code, Alias, Name, UOM, HSNCode, Category, 
-              PurchPrice, AltSalePrice, 
+              PurchPrice, PurchDiscount, AltSalePrice, AltPurchPrice, 
               MRP, SaleDiscount, MainUnit, AltUnit, Vendor, Tax, IsActive
             )
             VALUES @values
@@ -341,7 +345,9 @@ export class SyncController {
               HSNCode = VALUES(HSNCode),
               Category = VALUES(Category),
               PurchPrice = VALUES(PurchPrice),
+              PurchDiscount = VALUES(PurchDiscount),
               AltSalePrice = VALUES(AltSalePrice),
+              AltPurchPrice = VALUES(AltPurchPrice),
               MRP = VALUES(MRP),
               SaleDiscount = VALUES(SaleDiscount),
               MainUnit = VALUES(MainUnit),
@@ -760,6 +766,17 @@ export class SyncController {
             }
             syncedCount++;
           });
+
+          // Automatically reserve inventory for this synced Sales Order
+          if (resolvedSOId) {
+            console.log(`[Sync SO] Automatically reserving inventory for SO ${so.SOCode} (SOId: ${resolvedSOId})`);
+            try {
+              // UserId 1 is default/system user for background sync operations
+              await db.executeSp('sp_ReserveInventory', { SOId: resolvedSOId, UserId: 1 });
+            } catch (resvErr: any) {
+              console.error(`[Sync SO] Auto-reservation failed for SO ${so.SOCode}:`, resvErr.message);
+            }
+          }
         } catch (err: any) {
           console.error(`[Sync] Failed to sync SO ${so.SOCode}:`, err.message);
           await db.executeCmd(`
@@ -995,14 +1012,14 @@ export class SyncController {
     try {
       const pool = mssqlDb.getPool();
       const query = `
-        SELECT name, alias, HSNCODE,
+        SELECT CODE, name, alias, HSNCODE,
           (SELECT NAME FROM MASTER1 M WHERE M.CODE=MASTER1.ParentGrp) AS ITEM_GRP,
-          d4 AS purch_price, d17 AS purch_dis, d21 AS alt_sale_price, d22 AS alt_purch_price,
-          D3 AS MRP, D16 AS SALE_DIS,
+          d4 AS purch_price, d17 AS purch_dis, d3 AS alt_sale_price, d22 AS alt_purch_price,
+          D2 AS MRP, D16 AS SALE_DIS,
           (SELECT NAME FROM MASTER1 m WHERE m.CODE=MASTER1.CM1) AS MAINUNIT,
           (SELECT NAME FROM MASTER1 m WHERE m.CODE=MASTER1.CM2) AS ALTUNIT,
           (SELECT NAME FROM MASTER1 m WHERE m.CODE=MASTER1.CM9) AS vndor,
-          (SELECT NAME FROM MASTER1 m WHERE m.CODE=MASTER1.B16) AS tax
+          (SELECT NAME FROM MASTER1 m WHERE m.CODE=MASTER1.CM8) AS tax
         FROM master1 
         WHERE mastertype=6 AND alias LIKE (@text1 + '[0-9]%') 
         ORDER BY ALIAS
@@ -1089,7 +1106,9 @@ export class SyncController {
     `;
 
     const start = new Date(startDateParam);
+    start.setHours(0, 0, 0, 0);
     const end = new Date(endDateParam);
+    end.setHours(23, 59, 59, 999);
 
     const result = await pool.request()
       .input('startdate', mssql.DateTime, start)
@@ -1247,7 +1266,9 @@ export class SyncController {
     `;
 
     const start = new Date(startDateParam);
+    start.setHours(0, 0, 0, 0);
     const end = new Date(endDateParam);
+    end.setHours(23, 59, 59, 999);
 
     const result = await pool.request()
       .input('startdate', mssql.DateTime, start)

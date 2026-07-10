@@ -16,6 +16,8 @@ export default function DateRangeFilter({
   onEndDateChange,
   size = 'small',
 }: DateRangeFilterProps) {
+  const today = new Date().toISOString().split('T')[0];
+
   return (
     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
       <TextField
@@ -25,6 +27,7 @@ export default function DateRangeFilter({
         value={startDate}
         onChange={(e) => onStartDateChange(e.target.value)}
         InputLabelProps={{ shrink: true }}
+        inputProps={{ max: today }}
         sx={{ minWidth: 145 }}
       />
       <TextField
@@ -34,6 +37,8 @@ export default function DateRangeFilter({
         value={endDate}
         onChange={(e) => onEndDateChange(e.target.value)}
         InputLabelProps={{ shrink: true }}
+        inputProps={{ max: today, min: startDate }}
+        disabled={!startDate}
         sx={{ minWidth: 145 }}
       />
     </Box>

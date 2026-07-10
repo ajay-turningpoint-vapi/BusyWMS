@@ -134,6 +134,7 @@ export class OutboundController {
         INNER JOIN tblSalesOrder so ON p.SOId = so.SOId
         INNER JOIN tblUser u1 ON p.CreatedBy = u1.UserId
         LEFT JOIN tblUser u2 ON p.AssignedTo = u2.UserId
+        WHERE so.Status NOT IN ('DISPATCHED', 'CANCELLED')
         ORDER BY p.PickListId DESC
       `);
       return res.json(rows);
@@ -147,7 +148,7 @@ export class OutboundController {
     try {
       const rows = await db.query(`
         SELECT pd.*, i.Name AS ItemName, i.Code AS ItemCode, b.Code AS BinCode, b.Barcode AS BinBarcode, bat.BatchNumber,
-               z.Code AS ZoneCode, z.Name AS ZoneName, r.Code AS RackCode, r.Name AS RackName, s.Code AS ShelfCode
+               z.Code AS ZoneCode, z.Name AS ZoneName, r.Code AS RackCode, r.Name AS RackName, s.Code AS ShelfCode, s.Name AS ShelfName
         FROM tblPickListDetail pd
         INNER JOIN tblItem i ON pd.ItemId = i.ItemId
         INNER JOIN tblBin b ON pd.BinId = b.BinId
@@ -294,6 +295,7 @@ export class OutboundController {
   
   public static async createSalesOrder(req: AuthenticatedRequest, res: Response) {
     const { SOCode, CustomerName, CustomerCode, OrderDate, Items } = req.body;
+    const userId = req.user?.userId || 1;
     try {
       const validation = await OrderValidator.validate({
         OrderCode: SOCode,
@@ -337,6 +339,15 @@ export class OutboundController {
         return newSoId;
       });
 
+      // Automatically reserve inventory for this manually created Sales Order
+      if (soId) {
+        try {
+          await db.executeSp('sp_ReserveInventory', { SOId: soId, UserId: userId });
+        } catch (resvErr: any) {
+          console.error(`Auto-reservation failed on creation for SO ${orderCode}:`, resvErr.message);
+        }
+      }
+
       return res.status(201).json({ message: 'Sales Order created successfully', soId, SOCode: orderCode });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
@@ -346,13 +357,15 @@ export class OutboundController {
   public static async updateSalesOrder(req: AuthenticatedRequest, res: Response) {
     const { soId } = req.params;
     const { SOCode, CustomerName, CustomerCode, OrderDate, Items } = req.body;
+    const userId = req.user?.userId || 1;
+
     try {
       const existing = await db.query('SELECT Status FROM tblSalesOrder WHERE SOId = @soId', { soId });
       if (existing.length === 0) {
         return res.status(404).json({ message: 'Sales Order not found' });
       }
-      if (existing[0].Status !== 'PENDING') {
-        return res.status(400).json({ message: 'Only PENDING Sales Orders can be modified.' });
+      if (existing[0].Status !== 'PENDING' && existing[0].Status !== 'RESERVED' && existing[0].Status !== 'PARTIAL_RESERVED') {
+        return res.status(400).json({ message: 'Only PENDING or RESERVED/PARTIAL_RESERVED Sales Orders can be modified.' });
       }
 
       const validation = await OrderValidator.validate({
@@ -368,9 +381,22 @@ export class OutboundController {
       }
 
       await db.transaction(async (tx) => {
+        // Release existing active reservations inside transaction to prevent inventory leak
+        const reservations = await tx.query(`SELECT * FROM tblReservation WHERE SOId = @soId AND Status = 'ACTIVE'`, { soId });
+        for (const resv of reservations) {
+          await tx.executeCmd(`
+            UPDATE tblInventory 
+            SET ReservedQty = CASE WHEN ReservedQty - @qty < 0 THEN 0 ELSE ReservedQty - @qty END,
+                UpdatedAt = CURRENT_TIMESTAMP
+            WHERE BinId = @binId AND ItemId = @itemId 
+              AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
+          `, { qty: resv.Quantity, binId: resv.BinId, itemId: resv.ItemId, batchId: resv.BatchId });
+        }
+        await tx.executeCmd(`UPDATE tblReservation SET Status = 'RELEASED' WHERE SOId = @soId`, { soId });
+
         await tx.executeCmd(`
           UPDATE tblSalesOrder
-          SET SOCode = @SOCode, CustomerName = @CustomerName, CustomerCode = @CustomerCode, OrderDate = @OrderDate, UpdatedAt = CURRENT_TIMESTAMP
+          SET SOCode = @SOCode, CustomerName = @CustomerName, CustomerCode = @CustomerCode, OrderDate = @OrderDate, Status = 'PENDING', UpdatedAt = CURRENT_TIMESTAMP
           WHERE SOId = @soId
         `, {
           SOCode: SOCode.trim(),
@@ -395,6 +421,15 @@ export class OutboundController {
           });
         }
       });
+
+      // Automatically reserve inventory for this updated Sales Order
+      if (soId) {
+        try {
+          await db.executeSp('sp_ReserveInventory', { SOId: Number(soId), UserId: userId });
+        } catch (resvErr: any) {
+          console.error(`Auto-reservation failed on update for SO ${SOCode}:`, resvErr.message);
+        }
+      }
 
       return res.json({ message: 'Sales Order updated successfully' });
     } catch (err: any) {

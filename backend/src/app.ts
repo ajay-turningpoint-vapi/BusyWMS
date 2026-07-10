@@ -189,6 +189,7 @@ app.post('/api/inventory/damage/review', authenticateJWT, requirePermission('Inv
 app.get('/api/inventory/returns', authenticateJWT, requirePermission('Inbound', 'read'), requireFeature('MODULE_RETURNS'), ReturnsController.getReturns);
 app.post('/api/inventory/returns/receive', authenticateJWT, requirePermission('Inbound', 'create'), requireFeature('MODULE_RETURNS'), ReturnsController.receiveReturn);
 app.post('/api/inventory/returns/process-qc', authenticateJWT, requirePermission('Inbound', 'update'), requireFeature('MODULE_RETURNS'), ReturnsController.processReturnQC);
+app.get('/api/inventory/returns/order-details', authenticateJWT, requirePermission('Inbound', 'read'), requireFeature('MODULE_RETURNS'), ReturnsController.getOrderDetailsByCode);
 
 // Outbound Operations
 app.get('/api/outbound/sales-orders', authenticateJWT, requirePermission('Outbound', 'read'), OutboundController.getSalesOrders);

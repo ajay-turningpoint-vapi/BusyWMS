@@ -17,6 +17,16 @@ import StatusFilter from '../../components/StatusFilter';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { exportToCSV } from '../../utils/exportCSV';
 import { useToast } from '../../contexts/ToastContext';
+const formatDisplayDate = (dateVal: any) => {
+  if (!dateVal) return 'N/A';
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return 'N/A';
+  const day = String(d.getDate()).padStart(2, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = months[d.getMonth()];
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
 
 export default function SyncPO() {
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
@@ -378,7 +388,7 @@ export default function SyncPO() {
                         <TableCell><TransactionLink type="PO" id={po.POCode} /></TableCell>
                         <TableCell>{po.VendorName} ({po.VendorCode})</TableCell>
                         <TableCell>{po.PreparedBy || 'N/A'}</TableCell>
-                        <TableCell>{new Date(po.OrderDate).toLocaleDateString()}</TableCell>
+                        <TableCell>{formatDisplayDate(po.OrderDate)}</TableCell>
                         <TableCell>
                           <Chip 
                             label={po.Status} 

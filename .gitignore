@@ -45,3 +45,6 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.swp
+
+# Mobile App
+mobile-app/

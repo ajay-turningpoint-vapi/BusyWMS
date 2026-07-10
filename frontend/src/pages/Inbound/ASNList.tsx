@@ -232,8 +232,10 @@ export default function ASNList() {
               fullWidth
               size="small"
               InputLabelProps={{ shrink: true }}
+              inputProps={{ min: startDate }}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
+              disabled={!startDate}
             />
           </Grid>
           <Grid item xs={12} sm={6} md={2}>
