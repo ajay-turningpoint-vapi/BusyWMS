@@ -39,22 +39,37 @@ export default function GRN() {
 
   // Selected PO object for Autocomplete
   const [selectedPO, setSelectedPO] = useState<any | null>(null);
-
-  const loadPOs = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/inbound/pending-pos');
-      setPos(res.data);
-      setLoading(false);
-    } catch (err) {
-      setError('Failed to load pending POs');
-      setLoading(false);
-    }
-  };
+  const [poSearchQuery, setPoSearchQuery] = useState('');
+  const [posLoading, setPosLoading] = useState(false);
 
   useEffect(() => {
-    loadPOs();
-  }, []);
+    const trimmed = poSearchQuery.trim();
+    if (!trimmed) {
+      setPos([]);
+      setPosLoading(false);
+      setLoading(false);
+      return;
+    }
+    setPosLoading(true);
+    const delayDebounce = setTimeout(() => {
+      api.get('/inbound/pending-pos', {
+        params: {
+          search: trimmed
+        }
+      })
+        .then(res => {
+          setPos(res.data || []);
+          setPosLoading(false);
+          setLoading(false);
+        })
+        .catch(err => {
+          console.error(err);
+          setPosLoading(false);
+          setLoading(false);
+        });
+    }, 400); // 400ms debounce
+    return () => clearTimeout(delayDebounce);
+  }, [poSearchQuery]);
 
   const handlePOChange = async (poId: number | string) => {
     setSelectedPOId(poId);
@@ -187,7 +202,7 @@ export default function GRN() {
       setSelectedPOId('');
       setSelectedPO(null);
       setPoDetails([]);
-      loadPOs();
+      setPoSearchQuery('');
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'GRN saving failed');
     }
@@ -370,6 +385,10 @@ export default function GRN() {
             <Autocomplete
               options={pos}
               value={selectedPO}
+              loading={posLoading}
+              onInputChange={(event, newInputValue) => {
+                setPoSearchQuery(newInputValue);
+              }}
               onChange={(_event, newValue) => {
                 setSelectedPO(newValue);
                 handlePOChange(newValue ? newValue.POId : '');
@@ -377,14 +396,6 @@ export default function GRN() {
               getOptionLabel={(option: any) =>
                 option ? `${option.POCode} — ${option.VendorName} (${option.VendorCode})` : ''
               }
-              filterOptions={(options, { inputValue }) => {
-                const q = inputValue.toLowerCase();
-                return options.filter((po: any) =>
-                  po.POCode?.toLowerCase().includes(q) ||
-                  po.VendorName?.toLowerCase().includes(q) ||
-                  po.VendorCode?.toLowerCase().includes(q)
-                );
-              }}
               isOptionEqualToValue={(option: any, value: any) => option.POId === value?.POId}
               renderOption={(props, option: any) => (
                 <Box component="li" {...props} key={option.POId} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start !important', gap: 0.25, py: 1 }}>
@@ -402,6 +413,15 @@ export default function GRN() {
                   label="Search & Select Purchase Order"
                   placeholder="Type PO code, vendor name, or vendor code..."
                   size="small"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {posLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
                 />
               )}
               noOptionsText="No matching Purchase Orders"

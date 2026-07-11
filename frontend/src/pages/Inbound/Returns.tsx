@@ -16,7 +16,6 @@ import { useToast } from '../../contexts/ToastContext';
 
 export default function Returns() {
   const [returns, setReturns] = useState<any[]>([]);
-  const [items, setItems] = useState<any[]>([]);
   const [bins, setBins] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -70,8 +69,6 @@ export default function Returns() {
     try {
       const retRes = await api.get('/inventory/returns');
       setReturns(retRes.data);
-      const itemRes = await api.get('/masters/items');
-      setItems(itemRes.data);
       const binRes = await api.get('/masters/bins');
       setBins(binRes.data);
       setLoading(false);

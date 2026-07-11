@@ -26,6 +26,8 @@ async function clearData() {
     'tblGRN',
     'tblPurchaseOrderDetail',
     'tblPurchaseOrder',
+    'tblASNItem',
+    'tblASN',
     'tblSerialNo',
     'tblBatch',
     'tblItem',

@@ -34,12 +34,12 @@ async function compare() {
     const wmsItems = await db.query('SELECT Code, Name, UOM FROM tblItem');
     console.log(`WMS total items: ${wmsItems.length}`);
 
-    // Compare
-    const erpCodes = new Set(erpItems.map((r: any) => String(r.alias || (r.CODE ? String(r.CODE).trim() : '')).trim()));
+    // Compare using the stable ERP CODE
+    const erpCodes = new Set(erpItems.map((r: any) => String(r.CODE || '').trim()));
     const wmsCodes = new Set(wmsItems.map((r: any) => String(r.Code || '').trim()));
 
     const missingInWms = erpItems.filter((r: any) => {
-      const code = String(r.alias || (r.CODE ? String(r.CODE).trim() : '')).trim();
+      const code = String(r.CODE || '').trim();
       return !wmsCodes.has(code);
     });
 

@@ -297,7 +297,7 @@ export class SyncController {
       // Filter out deleted items
       const beforeCount = erpItems.length;
       erpItems = erpItems.filter((row: any) => {
-        const code = row.alias ? String(row.alias).trim() : (row.CODE ? String(row.CODE).trim() : '');
+        const code = row.CODE ? String(row.CODE).trim() : (row.alias ? String(row.alias).trim() : '');
         return !deletedCodes.has(code);
       });
       console.log(`Filtered out ${beforeCount - erpItems.length} deleted items. ${erpItems.length} items remain for sync.`);
@@ -309,7 +309,7 @@ export class SyncController {
       for (let i = 0; i < erpItems.length; i += chunkSize) {
         const chunk = erpItems.slice(i, i + chunkSize);
         const values = chunk.map(row => {
-          const code = row.alias ? String(row.alias).trim() : (row.CODE ? String(row.CODE).trim() : (row.name ? String(row.name).trim() : ''));
+          const code = row.CODE ? String(row.CODE).trim() : (row.alias ? String(row.alias).trim() : (row.name ? String(row.name).trim() : ''));
           const alias = row.alias ? String(row.alias).trim() : null;
           const name = row.name ? String(row.name).trim() : code;
           const uom = row.MAINUNIT ? String(row.MAINUNIT).trim() : 'PCS';
@@ -461,15 +461,16 @@ export class SyncController {
             console.log(`[Sync] Dynamically creating item ${code} - ${item.ItemName}`);
             try {
               await db.executeCmd(`
-                INSERT INTO tblItem (Code, Name, Description, Category, Brand, UOM, Barcode, HSNCode, IsActive)
-                VALUES (@code, @name, @desc, @category, 'ERP', @uom, @barcode, @hsn, 1)
+                INSERT INTO tblItem (Code, Alias, Name, Description, Category, Brand, UOM, Barcode, HSNCode, IsActive)
+                VALUES (@code, @alias, @name, @desc, @category, 'ERP', @uom, @barcode, @hsn, 1)
               `, {
                 code,
+                alias: item.Alias || null,
                 name: item.ItemName || code,
                 desc: 'Synced from ERP PO',
                 category: item.ItemGrp || 'General',
                 uom: item.UOM || 'PCS',
-                barcode: code,
+                barcode: item.Alias || code,
                 hsn: item.HSNCode || null
               });
             } catch (err: any) {
@@ -668,15 +669,16 @@ export class SyncController {
             console.log(`[Sync] Dynamically creating item ${code} - ${item.ItemName}`);
             try {
               await db.executeCmd(`
-                INSERT INTO tblItem (Code, Name, Description, Category, Brand, UOM, Barcode, IsActive)
-                VALUES (@code, @name, @desc, @category, 'ERP', @uom, @barcode, 1)
+                INSERT INTO tblItem (Code, Alias, Name, Description, Category, Brand, UOM, Barcode, IsActive)
+                VALUES (@code, @alias, @name, @desc, @category, 'ERP', @uom, @barcode, 1)
               `, {
                 code,
+                alias: item.Alias || null,
                 name: item.ItemName || code,
                 desc: 'Synced from ERP SO',
                 category: item.ItemGrp || 'General',
                 uom: item.UOM || 'PCS',
-                barcode: code
+                barcode: item.Alias || code
               });
             } catch (err: any) {
               console.error(`[Sync] Failed to dynamically create item ${code}:`, err.message);
@@ -1133,7 +1135,7 @@ export class SyncController {
       
       const vendorName = row.PARTYNAME ? String(row.PARTYNAME).trim() : '';
       const vendorCode = row.PARTY_CODE ? String(row.PARTY_CODE).trim() : vendorName;
-      const itemCode = row.ALIAS ? String(row.ALIAS).trim() : (row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : '');
+      const itemCode = row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : (row.ALIAS ? String(row.ALIAS).trim() : '');
       if (!itemCode) continue;
 
       if (!poMap.has(vouNo)) {
@@ -1150,6 +1152,7 @@ export class SyncController {
 
       poMap.get(vouNo).Items.push({
         ItemCode: itemCode,
+        Alias: row.ALIAS ? String(row.ALIAS).trim() : null,
         ItemName: row.ITEMNAME ? String(row.ITEMNAME).trim() : itemCode,
         ItemGrp: 'General',
         HSNCode: null,
@@ -1294,7 +1297,7 @@ export class SyncController {
       
       const customerName = row.PARTYNAME ? String(row.PARTYNAME).trim() : '';
       const customerCode = row.PARTY_CODE ? String(row.PARTY_CODE).trim() : customerName;
-      const itemCode = row.ALIAS ? String(row.ALIAS).trim() : (row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : '');
+      const itemCode = row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : (row.ALIAS ? String(row.ALIAS).trim() : '');
       if (!itemCode) continue;
 
       if (!soMap.has(vouNo)) {
@@ -1310,6 +1313,7 @@ export class SyncController {
 
       soMap.get(vouNo).Items.push({
         ItemCode: itemCode,
+        Alias: row.ALIAS ? String(row.ALIAS).trim() : null,
         ItemName: row.ITEM ? String(row.ITEM).trim() : itemCode,
         ItemGrp: row.ITEM_GRP ? String(row.ITEM_GRP).trim() : 'General',
         OrderQty: Math.abs(row.QTY || 0),

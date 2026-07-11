@@ -2,17 +2,26 @@ import { Response } from 'express';
 import { db } from '../../config/db';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { OrderValidator } from '../../services/OrderValidator';
+import http from 'http';
 
 export class GrnController {
 
   public static async getPendingPOs(req: AuthenticatedRequest, res: Response) {
     try {
-      // Get unique pending POs list
-      const rows = await db.query(`
+      const search = (req.query.search as string || '').trim();
+      let query = `
         SELECT DISTINCT POId, POCode, VendorName, VendorCode, OrderDate 
         FROM vw_PendingGRN
-        ORDER BY OrderDate DESC, POId DESC
-      `);
+      `;
+      const params: Record<string, any> = {};
+      
+      if (search) {
+        query += ` WHERE (POCode LIKE @search OR VendorName LIKE @search OR VendorCode LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+      
+      query += ` ORDER BY OrderDate DESC, POId DESC`;
+      const rows = await db.query(query, params);
       return res.json(rows);
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
@@ -41,26 +50,170 @@ export class GrnController {
     }
 
     try {
+      // 1. Skip items with zero received quantity (BUG-010) and validate
+      const validItems = items.filter((item: any) => item.receivedQty > 0);
+      if (validItems.length === 0) {
+        return res.status(400).json({ message: 'At least one item must have a received quantity greater than zero' });
+      }
+
+      // 2. Fetch PO & Item details to construct XML payload
+      let poCode = '';
+      let vendorName = '';
+      if (poId) {
+        const poRows = await db.query('SELECT POCode, VendorName FROM tblPurchaseOrder WHERE POId = @poId', { poId });
+        if (poRows.length > 0) {
+          poCode = poRows[0].POCode || '';
+          vendorName = poRows[0].VendorName || '';
+        }
+      }
+
+      const itemsWithDetails: any[] = [];
+      for (const item of validItems) {
+        const itemRows = await db.query('SELECT Name, UOM FROM tblItem WHERE ItemId = @itemId', { itemId: item.itemId });
+        const itemName = itemRows.length > 0 ? itemRows[0].Name : '';
+        const itemUom = itemRows.length > 0 ? itemRows[0].UOM : 'SQFT';
+        itemsWithDetails.push({
+          ...item,
+          itemName,
+          itemUom
+        });
+      }
+
+      const getFormattedDate = (date: Date = new Date()): string => {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}-${month}-${year}`;
+      };
+
+      const dateStr = getFormattedDate();
+
+      let itemDetailsXml = '';
+      itemsWithDetails.forEach((item, index) => {
+        itemDetailsXml += `<ItemDetail>` +
+          `<Date>${dateStr}</Date>` +
+          `<VchType>4</VchType>` +
+          `<VchNo>${poCode}</VchNo>` +
+          `<SrNo>${index + 1}</SrNo>` +
+          `<ItemName>${item.itemName}</ItemName>` +
+          `<UnitName>${item.itemUom || 'SQFT'}</UnitName>` +
+          `<AltUnitName>${item.itemUom || 'SQFT'}</AltUnitName>` +
+          `<Qty>${item.receivedQty}</Qty>` +
+        `</ItemDetail>`;
+      });
+
+      const xmlStr = `<MaterialReceipt>` +
+        `<VchSeriesName>TP</VchSeriesName>` +
+        `<Date>${dateStr}</Date>` +
+        `<VchType>4</VchType>` +
+        `<TranType>3</TranType>` +
+        `<VchNo>${poCode}</VchNo>` +
+        `<STPTName>Local-18%</STPTName>` +
+        `<MasterName1>${vendorName}</MasterName1>` +
+        `<MasterName2>TURNING POINT</MasterName2>` +
+        `<ItemEntries>${itemDetailsXml}</ItemEntries>` +
+      `</MaterialReceipt>`;
+
+      // 3. Post to Busy ERP HTTP API
+      const erpResult = await new Promise<{ success: boolean; message: string }>((resolve) => {
+        const options = {
+          hostname: '192.168.1.11',
+          port: 999,
+          path: '/',
+          method: 'POST',
+          headers: {
+            'SC': '2',
+            'Date': dateStr,
+            'VchType': '4',
+            'TranType': '3',
+            'UserName': 'Nilesh',
+            'Pwd': 'tppl@12_34',
+            'Content-Type': 'application/xml',
+            'VchXml': xmlStr
+          }
+        };
+
+        const reqHttp = http.request(options, (resHttp) => {
+          let responseData = '';
+          resHttp.on('data', (chunk) => {
+            responseData += chunk;
+          });
+          resHttp.on('end', () => {
+            const result = resHttp.headers['result'];
+            const description = resHttp.headers['description'] as string;
+            if (result === 'T') {
+              resolve({ success: true, message: responseData });
+            } else {
+              resolve({ success: false, message: description || 'ERP returned failure without description header' });
+            }
+          });
+        });
+
+        reqHttp.setTimeout(10000, () => {
+          reqHttp.destroy();
+          resolve({ success: false, message: 'ERP connection timed out after 10 seconds' });
+        });
+
+        reqHttp.on('error', (err) => {
+          resolve({ success: false, message: err.message || 'Network error connecting to ERP' });
+        });
+
+        reqHttp.end();
+      });
+
+      if (!erpResult.success) {
+        return res.status(400).json({ message: 'ERP posting failed: ' + erpResult.message });
+      }
+
       // Check if Quality Assurance Check feature is enabled
       const qaConfig = await db.query('SELECT IsEnabled FROM tblFeatureConfig WHERE FeatureCode = "MODULE_QUALITY_ASSURANCE"');
       const isQaEnabled = qaConfig.length > 0 ? qaConfig[0].IsEnabled === 1 : true;
 
-      // 1. Insert parent GRN record
+      // 4. Insert parent GRN record (with IsSynced = 1 since ERP posting succeeded)
       const grnCode = `GRN-${Date.now()}`;
       const grnStatus = isQaEnabled ? 'PENDING' : 'QC_COMPLETED';
       const grnResult = await db.executeCmd(`
-        INSERT INTO tblGRN (GRNCode, POId, ReceivedDate, InvoiceNo, ReceivedBy, Status)
-        VALUES (@grnCode, @poId, CURRENT_TIMESTAMP, @invoiceNo, @userId, @grnStatus)
+        INSERT INTO tblGRN (GRNCode, POId, ReceivedDate, InvoiceNo, ReceivedBy, Status, IsSynced)
+        VALUES (@grnCode, @poId, CURRENT_TIMESTAMP, @invoiceNo, @userId, @grnStatus, 1)
       `, { grnCode, poId: poId || null, invoiceNo: invoiceNo || null, userId, grnStatus });
 
       const grnId = grnResult.lastID!;
 
-      // 2. Loop through GRN details — skip items with zero received quantity (BUG-010)
-      const validItems = items.filter((item: any) => item.receivedQty > 0);
-      if (validItems.length === 0) {
-        // Rollback the GRN header if no valid items
-        await db.executeCmd('DELETE FROM tblGRN WHERE GRNId = @grnId', { grnId });
-        return res.status(400).json({ message: 'At least one item must have a received quantity greater than zero' });
+      if (poId) {
+        // Query the ordered qty vs already GRN'd quantities for each item in the PO
+        const poItems = await db.query(`
+          SELECT 
+              pod.ItemId,
+              pod.OrderQty,
+              COALESCE(grn_sum.TotalGrnQty, 0) AS TotalGrnQty
+          FROM tblPurchaseOrderDetail pod
+          LEFT JOIN (
+              SELECT gd.ItemId, SUM(gd.ReceivedQty) AS TotalGrnQty
+              FROM tblGRNDetail gd
+              INNER JOIN tblGRN g ON gd.GRNId = g.GRNId
+              WHERE g.POId = @poId AND g.Status != 'CANCELLED'
+              GROUP BY gd.ItemId
+          ) grn_sum ON pod.ItemId = grn_sum.ItemId
+          WHERE pod.POId = @poId
+        `, { poId });
+
+        // Determine if there is any remaining quantity after this GRN
+        let isPartial = false;
+        for (const poItem of poItems) {
+          const currentGrnItem = validItems.find((vi: any) => vi.itemId === poItem.ItemId);
+          const newGrnQty = currentGrnItem ? parseFloat(currentGrnItem.receivedQty || 0) : 0;
+          const remaining = poItem.OrderQty - (poItem.TotalGrnQty + newGrnQty);
+          if (remaining > 0) {
+            isPartial = true;
+            break;
+          }
+        }
+
+        const newStatus = isPartial ? 'PARTIAL' : 'GRN_CREATED';
+
+        await db.executeCmd(`
+          UPDATE tblPurchaseOrder SET Status = @newStatus, UpdatedAt = CURRENT_TIMESTAMP WHERE POId = @poId
+        `, { poId, newStatus });
       }
 
       for (const item of validItems) {
@@ -455,6 +608,138 @@ export class GrnController {
         await tx.executeCmd('DELETE FROM tblPurchaseOrder WHERE POId = @poId', { poId });
       });
       return res.json({ message: 'Purchase Order deleted successfully' });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async syncGRNToERP(req: AuthenticatedRequest, res: Response) {
+    const { grnId } = req.params;
+    try {
+      // 1. Fetch GRN header
+      const grnRows = await db.query('SELECT * FROM tblGRN WHERE GRNId = @grnId', { grnId });
+      if (grnRows.length === 0) {
+        return res.status(404).json({ message: 'GRN not found' });
+      }
+      const grn = grnRows[0];
+
+      if (grn.IsSynced === 1) {
+        return res.status(400).json({ message: 'GRN is already synced to ERP' });
+      }
+
+      // 2. Fetch PO & Vendor Details
+      let poCode = '';
+      let vendorName = '';
+      if (grn.POId) {
+        const poRows = await db.query('SELECT POCode, VendorName FROM tblPurchaseOrder WHERE POId = @poId', { poId: grn.POId });
+        if (poRows.length > 0) {
+          poCode = poRows[0].POCode || '';
+          vendorName = poRows[0].VendorName || '';
+        }
+      }
+
+      // 3. Fetch GRN details and item codes/names
+      const details = await db.query(`
+        SELECT gd.ReceivedQty, item.Name AS itemName, item.UOM AS itemUom
+        FROM tblGRNDetail gd
+        INNER JOIN tblItem item ON gd.ItemId = item.ItemId
+        WHERE gd.GRNId = @grnId AND gd.ReceivedQty > 0
+      `, { grnId });
+
+      if (details.length === 0) {
+        return res.status(400).json({ message: 'No valid items in this GRN to sync' });
+      }
+
+      const getFormattedDate = (date: Date): string => {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}-${month}-${year}`;
+      };
+
+      const dateStr = getFormattedDate(new Date(grn.ReceivedDate));
+
+      let itemDetailsXml = '';
+      details.forEach((item: any, index: number) => {
+        itemDetailsXml += `<ItemDetail>` +
+          `<Date>${dateStr}</Date>` +
+          `<VchType>4</VchType>` +
+          `<VchNo>${poCode}</VchNo>` +
+          `<SrNo>${index + 1}</SrNo>` +
+          `<ItemName>${item.itemName}</ItemName>` +
+          `<UnitName>${item.itemUom || 'SQFT'}</UnitName>` +
+          `<AltUnitName>${item.itemUom || 'SQFT'}</AltUnitName>` +
+          `<Qty>${item.ReceivedQty}</Qty>` +
+        `</ItemDetail>`;
+      });
+
+      const xmlStr = `<MaterialReceipt>` +
+        `<VchSeriesName>TP</VchSeriesName>` +
+        `<Date>${dateStr}</Date>` +
+        `<VchType>4</VchType>` +
+        `<TranType>3</TranType>` +
+        `<VchNo>${poCode}</VchNo>` +
+        `<STPTName>Local-18%</STPTName>` +
+        `<MasterName1>${vendorName}</MasterName1>` +
+        `<MasterName2>TURNING POINT</MasterName2>` +
+        `<ItemEntries>${itemDetailsXml}</ItemEntries>` +
+      `</MaterialReceipt>`;
+
+      // 4. Send request to ERP
+      const erpResult = await new Promise<{ success: boolean; message: string }>((resolve) => {
+        const options = {
+          hostname: '192.168.1.11',
+          port: 999,
+          path: '/',
+          method: 'POST',
+          headers: {
+            'SC': '2',
+            'Date': dateStr,
+            'VchType': '4',
+            'TranType': '3',
+            'UserName': 'Nilesh',
+            'Pwd': 'tppl@12_34',
+            'Content-Type': 'application/xml',
+            'VchXml': xmlStr
+          }
+        };
+
+        const reqHttp = http.request(options, (resHttp) => {
+          let responseData = '';
+          resHttp.on('data', (chunk) => {
+            responseData += chunk;
+          });
+          resHttp.on('end', () => {
+            const result = resHttp.headers['result'];
+            const description = resHttp.headers['description'] as string;
+            if (result === 'T') {
+              resolve({ success: true, message: responseData });
+            } else {
+              resolve({ success: false, message: description || 'ERP returned failure without description header' });
+            }
+          });
+        });
+
+        reqHttp.setTimeout(10000, () => {
+          reqHttp.destroy();
+          resolve({ success: false, message: 'ERP connection timed out after 10 seconds' });
+        });
+
+        reqHttp.on('error', (err) => {
+          resolve({ success: false, message: err.message || 'Network error connecting to ERP' });
+        });
+
+        reqHttp.end();
+      });
+
+      if (!erpResult.success) {
+        return res.status(400).json({ message: 'ERP posting failed: ' + erpResult.message });
+      }
+
+      // 5. Update status
+      await db.executeCmd('UPDATE tblGRN SET IsSynced = 1 WHERE GRNId = @grnId', { grnId });
+
+      return res.json({ success: true, message: 'GRN synced to ERP successfully' });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }

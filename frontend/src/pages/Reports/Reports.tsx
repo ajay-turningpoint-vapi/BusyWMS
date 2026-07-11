@@ -88,6 +88,7 @@ export default function Reports() {
   const [warehouseFilter, setWarehouseFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [excludeCompleted, setExcludeCompleted] = useState(true);
+  const [syncingGrnIds, setSyncingGrnIds] = useState<Record<number, boolean>>({});
   
   // Bin capacity filters (Applied)
   const [zoneFilter, setZoneFilter] = useState('');
@@ -203,7 +204,7 @@ export default function Reports() {
   const [warehouses, setWarehouses] = useState<any[]>([]);
 
   const loadReport = async (tabIndex: number) => {
-    if (tabIndex === 4) {
+    if (tabIndex === 5) {
       setLoading(false);
       return;
     }
@@ -213,9 +214,10 @@ export default function Reports() {
     let endpoint = '/reports/stock';
     if (tabIndex === 1) endpoint = '/reports/pending-so';
     else if (tabIndex === 2) endpoint = '/reports/pending-po';
-    else if (tabIndex === 3) endpoint = '/reports/audit-logs';
-    else if (tabIndex === 5) endpoint = '/reports/bin-capacity';
-    else if (tabIndex === 6) endpoint = '/inbound/asn/reports';
+    else if (tabIndex === 3) endpoint = '/reports/created-grns';
+    else if (tabIndex === 4) endpoint = '/reports/audit-logs';
+    else if (tabIndex === 6) endpoint = '/reports/bin-capacity';
+    else if (tabIndex === 7) endpoint = '/inbound/asn/reports';
 
     try {
       const res = await api.get(endpoint, {
@@ -249,7 +251,7 @@ export default function Reports() {
 
   // Declarative unified reactive effect for data fetching
   useEffect(() => {
-    if (tabValue === 4) {
+    if (tabValue === 5) {
       setLoading(false);
       return;
     }
@@ -366,7 +368,7 @@ export default function Reports() {
 
 
   useEffect(() => {
-    if (tabValue === 4) {
+    if (tabValue === 5) {
       localStorage.setItem('wms_default_barcode_type', generatorType);
       localStorage.setItem('wms_default_barcode_width', generatorWidth.toString());
       localStorage.setItem('wms_default_barcode_height', generatorHeight.toString());
@@ -452,7 +454,7 @@ export default function Reports() {
   };
 
   const getSourceData = () => {
-    return tabValue === 6 ? getProcessedASNData() : filteredData;
+    return tabValue === 7 ? getProcessedASNData() : filteredData;
   };
 
   // Multi-field Filtering logic (now handled on the server)
@@ -470,10 +472,12 @@ export default function Reports() {
       case 2:
         return ['Purchase Order No', 'Purchase Order Date', 'Vendor Name', 'Item Code', 'Item Name', 'Ordered Qty', 'Received Qty', 'Pending Qty', 'Receipt Status', 'Warehouse', 'Ageing Days'];
       case 3:
+        return ['GRN Code', 'GRN Date', 'Invoice No', 'PO Code', 'Received By', 'Status', 'Sync Status'];
+      case 4:
         return ['Log ID', 'User', 'Action', 'Table Affected', 'IP Address', 'Date/Time'];
-      case 5:
-        return ['Bin Code', 'Warehouse', 'Current Items', 'Max Weight', 'Occupied Weight', 'Available Weight', 'Max Volume', 'Occupied Volume', 'Available Volume', 'Status', 'Weight Occupancy %', 'Volume Occupancy %'];
       case 6:
+        return ['Bin Code', 'Warehouse', 'Current Items', 'Max Weight', 'Occupied Weight', 'Available Weight', 'Max Volume', 'Occupied Volume', 'Available Volume', 'Status', 'Weight Occupancy %', 'Volume Occupancy %'];
+      case 7:
         if (asnReportView === 'summary') return ['ASN Number', 'Supplier', 'PO Ref', 'Expected Arrival', 'Transporter', 'Expected Qty', 'Received Qty', 'Status'];
         if (asnReportView === 'status') return ['ASN Number', 'Supplier', 'PO Ref', 'Expected Arrival', 'Transporter', 'Status'];
         if (asnReportView === 'pending') return ['ASN Number', 'Supplier', 'Expected Arrival', 'Item Code', 'Item Name', 'Expected Qty', 'Received Qty', 'Pending Qty'];
@@ -495,10 +499,12 @@ export default function Reports() {
       case 2:
         return ['POCode', 'OrderDate', 'VendorName', 'ItemCode', 'ItemName', 'OrderQty', 'ReceivedQty', 'PendingQty', 'Status', 'WarehouseCode', 'AgeingDays'];
       case 3:
+        return ['GRNCode', 'ReceivedDate', 'InvoiceNo', 'POCode', 'OperatorName', 'Status', 'IsSynced'];
+      case 4:
         return ['AuditId', 'Username', 'Action', 'TableName', 'IPAddress', 'Timestamp'];
-      case 5:
-        return ['BinCode', 'WarehouseName', 'CurrentItems', 'CapacityWeight', 'OccupiedWeight', 'AvailableWeight', 'CapacityVolume', 'OccupiedVolume', 'AvailableVolume', 'BinStatus', 'WeightOccupancyPercent', 'VolumeOccupancyPercent'];
       case 6:
+        return ['BinCode', 'WarehouseName', 'CurrentItems', 'CapacityWeight', 'OccupiedWeight', 'AvailableWeight', 'CapacityVolume', 'OccupiedVolume', 'AvailableVolume', 'BinStatus', 'WeightOccupancyPercent', 'VolumeOccupancyPercent'];
+      case 7:
         if (asnReportView === 'summary') return ['ASNNumber', 'SupplierName', 'POCode', 'ExpectedArrivalDate', 'Transporter', 'ExpectedQty', 'ReceivedQty', 'Status'];
         if (asnReportView === 'status') return ['ASNNumber', 'SupplierName', 'POCode', 'ExpectedArrivalDate', 'Transporter', 'Status'];
         if (asnReportView === 'pending') return ['ASNNumber', 'SupplierName', 'ExpectedArrivalDate', 'ItemCode', 'ItemName', 'ExpectedQty', 'ReceivedQty', 'PendingQty'];
@@ -513,7 +519,7 @@ export default function Reports() {
 
   // CSV Export
   const exportCSV = () => {
-    const reportNames = ['Stock_Status_Ledger', 'Pending_Sales_Order_Report', 'Pending_Purchase_Order_Report', 'System_Security_Audit_Trail', '', 'Bin_Capacity_Report', `ASN_${asnReportView}_Report`];
+    const reportNames = ['Stock_Status_Ledger', 'Pending_Sales_Order_Report', 'Pending_Purchase_Order_Report', 'Created_GRNs_Report', 'System_Security_Audit_Trail', '', 'Bin_Capacity_Report', `ASN_${asnReportView}_Report`];
     const headers = getHeaderList();
     const keys = getKeysList();
     
@@ -542,7 +548,7 @@ export default function Reports() {
 
   // PDF & Print Report
   const handlePrint = () => {
-    const titles = ['Stock Status Ledger', 'Pending Sales Order Report', 'Pending Purchase Order Report', 'System Security Audit Trail', '', 'Bin Capacity Utilization Report', `ASN ${asnReportView.toUpperCase()} Report`];
+    const titles = ['Stock Status Ledger', 'Pending Sales Order Report', 'Pending Purchase Order Report', 'Created GRNs Report', 'System Security Audit Trail', '', 'Bin Capacity Utilization Report', `ASN ${asnReportView.toUpperCase()} Report`];
     const headers = getHeaderList();
     const keys = getKeysList();
     
@@ -625,6 +631,19 @@ export default function Reports() {
   const handlePrintBarcodeClick = (row: any) => {
     setSelectedLedgerRow(row);
     setBarcodePrintOpen(true);
+  };
+
+  const handleSyncGRN = async (grnId: number) => {
+    setSyncingGrnIds(prev => ({ ...prev, [grnId]: true }));
+    try {
+      await api.post(`/inbound/grn/sync/${grnId}`);
+      // Refresh the report data to show the updated status
+      loadReport(tabValue);
+    } catch (err: any) {
+      alert(err.response?.data?.message || err.message || 'Sync failed');
+    } finally {
+      setSyncingGrnIds(prev => ({ ...prev, [grnId]: false }));
+    }
   };
 
   // Custom code print trigger for Barcode management tab
@@ -781,7 +800,7 @@ export default function Reports() {
             Query stock status ledger, pending orders, partial dispatch tracking, and generate barcode labels.
           </Typography>
         </Box>
-        {(tabValue < 4 || tabValue === 5 || tabValue === 6) && (
+        {tabValue !== 5 && (
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button variant="outlined" startIcon={<Printer size={14} />} onClick={handlePrint}>Print / PDF</Button>
             <Button variant="outlined" startIcon={<FileDown size={14} />} onClick={exportCSV}>Export CSV</Button>
@@ -799,13 +818,14 @@ export default function Reports() {
         <Tab label="Stock Status Ledger" />
         <Tab label="Pending Sales Orders" />
         <Tab label="Pending Purchase Orders" />
+        <Tab label="Created GRNs" />
         <Tab label="Security Audit Trail" />
         <Tab label="Barcode Label Generator" />
         <Tab label="Bin Capacity & Suitability" />
         <Tab label="ASN Inbound Notices" />
       </Tabs>
 
-      {(tabValue < 4 || tabValue === 5 || tabValue === 6) ? (
+      {tabValue !== 5 ? (
         <>
           {/* Dynamic Filter Panel */}
           <Card sx={{ p: 2, mb: 3, border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
@@ -943,7 +963,7 @@ export default function Reports() {
                 </>
               )}
 
-              {(tabValue === 1 || tabValue === 2) && (
+              {(tabValue === 1 || tabValue === 2 || tabValue === 3) && (
                 <Grid item xs={12} sm={3}>
                   <FormControl fullWidth size="small">
                     <InputLabel id="status-filter-label">Status</InputLabel>
@@ -961,11 +981,17 @@ export default function Reports() {
                           <MenuItem value="Partially Dispatched">Partially Dispatched</MenuItem>
                           <MenuItem value="Fully Dispatched">Fully Dispatched</MenuItem>
                         </>
-                      ) : (
+                      ) : tabValue === 2 ? (
                         <>
                           <MenuItem value="Pending">Pending</MenuItem>
                           <MenuItem value="Partially Received">Partially Received</MenuItem>
                           <MenuItem value="Fully Received">Fully Received</MenuItem>
+                        </>
+                      ) : (
+                        <>
+                          <MenuItem value="PENDING">Pending QC</MenuItem>
+                          <MenuItem value="QC_COMPLETED">QC Completed</MenuItem>
+                          <MenuItem value="PUTAWAY_COMPLETED">Putaway Completed</MenuItem>
                         </>
                       )}
                     </Select>
@@ -1185,6 +1211,17 @@ export default function Reports() {
                       )}
                       {tabValue === 3 && (
                         <>
+                          <TableCell sx={{ fontWeight: 600 }}>GRN Code</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>GRN Date</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Invoice No</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>PO Code</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Received By</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="center">Sync Status</TableCell>
+                        </>
+                      )}
+                      {tabValue === 4 && (
+                        <>
                           <TableCell sx={{ fontWeight: 600 }}>Log ID</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>User</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Action</TableCell>
@@ -1193,7 +1230,7 @@ export default function Reports() {
                           <TableCell sx={{ fontWeight: 600 }}>Date/Time</TableCell>
                         </>
                       )}
-                      {tabValue === 5 && (
+                      {tabValue === 6 && (
                         <>
                           <TableCell sx={{ fontWeight: 600 }}>Bin Code</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Warehouse</TableCell>
@@ -1205,7 +1242,7 @@ export default function Reports() {
                           <TableCell sx={{ fontWeight: 600 }}>Recommendation</TableCell>
                         </>
                       )}
-                      {tabValue === 6 && (
+                      {tabValue === 7 && (
                         <>
                           {asnReportView === 'summary' && (
                             <>
@@ -1411,8 +1448,49 @@ export default function Reports() {
                           </>
                         )}
 
-                        {/* Tab 3: Audit Trails */}
+                        {/* Tab 3: Created GRNs */}
                         {tabValue === 3 && (
+                          <>
+                            <TableCell><TransactionLink type="GRN" id={row.GRNCode} /></TableCell>
+                            <TableCell>{new Date(row.ReceivedDate).toLocaleDateString()}</TableCell>
+                            <TableCell>{row.InvoiceNo || 'N/A'}</TableCell>
+                            <TableCell>{row.POCode ? <TransactionLink type="PO" id={row.POCode} /> : 'Direct'}</TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.OperatorName}</TableCell>
+                            <TableCell>
+                              <Chip 
+                                size="small" 
+                                label={row.Status} 
+                                color={row.Status === 'QC_COMPLETED' || row.Status === 'PUTAWAY_COMPLETED' ? 'success' : 'warning'}
+                                sx={{ fontWeight: 600 }}
+                              />
+                            </TableCell>
+                            <TableCell align="center">
+                              {row.IsSynced === 1 ? (
+                                <Chip 
+                                  size="small" 
+                                  label="Synced" 
+                                  color="success" 
+                                  variant="outlined"
+                                  sx={{ fontWeight: 600 }}
+                                />
+                              ) : (
+                                <Button
+                                  variant="contained"
+                                  color="primary"
+                                  size="small"
+                                  onClick={() => handleSyncGRN(row.GRNId)}
+                                  disabled={!!syncingGrnIds[row.GRNId]}
+                                  sx={{ textTransform: 'none', fontWeight: 600, minWidth: 80 }}
+                                >
+                                  {syncingGrnIds[row.GRNId] ? 'Syncing...' : 'Sync'}
+                                </Button>
+                              )}
+                            </TableCell>
+                          </>
+                        )}
+
+                        {/* Tab 4: Audit Trails */}
+                        {tabValue === 4 && (
                           <>
                             <TableCell>
                               {['tblPurchaseOrder', 'tblGRN', 'tblSalesOrder', 'tblPickList', 'tblStockTransfer', 'tblPutaway', 'tblPacking', 'tblDispatch', 'tblQC', 'tblReservation'].includes(row.TableName) ? (
@@ -1445,8 +1523,8 @@ export default function Reports() {
                           </>
                         )}
 
-                        {/* Tab 5: Bin Capacity & Suitability */}
-                        {tabValue === 5 && (
+                        {/* Tab 6: Bin Capacity & Suitability */}
+                        {tabValue === 6 && (
                           <>
                             <TableCell sx={{ fontWeight: 700 }}><code>{row.BinCode}</code></TableCell>
                             <TableCell>{row.WarehouseName} ({row.ZoneName})</TableCell>
@@ -1497,8 +1575,8 @@ export default function Reports() {
                           </>
                         )}
 
-                        {/* Tab 6: ASN Inbound Notices */}
-                        {tabValue === 6 && (
+                        {/* Tab 7: ASN Inbound Notices */}
+                        {tabValue === 7 && (
                           <>
                             {asnReportView === 'summary' && (
                               <>
@@ -1578,7 +1656,7 @@ export default function Reports() {
                     
                     {getSourceData().length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={tabValue === 0 ? 9 : (tabValue === 1 || tabValue === 2 ? 11 : (tabValue === 5 ? 8 : (tabValue === 6 ? (asnReportView === 'summary' || asnReportView === 'pending' || asnReportView === 'variance' ? 8 : asnReportView === 'status' ? 6 : asnReportView === 'supplier' ? 4 : 5) : 8)))} align="center" sx={{ py: 5 }}>
+                        <TableCell colSpan={tabValue === 0 ? 9 : (tabValue === 1 || tabValue === 2 ? 11 : (tabValue === 3 ? 7 : (tabValue === 6 ? 8 : (tabValue === 7 ? (asnReportView === 'summary' || asnReportView === 'pending' || asnReportView === 'variance' ? 8 : asnReportView === 'status' ? 6 : asnReportView === 'supplier' ? 4 : 5) : 8))))} align="center" sx={{ py: 5 }}>
                           <Paper variant="outlined" sx={{ py: 3, px: 2, display: 'inline-block', maxWidth: 400, bgcolor: 'transparent', borderStyle: 'dashed' }}>
                             <Search size={32} style={{ color: '#94a3b8', marginBottom: '8px' }} />
                             <Typography variant="subtitle1" fontWeight={600} color="text.secondary">No matching data found</Typography>
@@ -1591,7 +1669,7 @@ export default function Reports() {
                 </Table>
               )}
             </TableContainer>
-            {!loading && tabValue !== 4 && (
+            {!loading && tabValue !== 5 && (
               <TablePaginationBar
                 count={totalRows}
                 page={pagination.page}

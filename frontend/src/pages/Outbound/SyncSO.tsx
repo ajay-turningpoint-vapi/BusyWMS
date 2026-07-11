@@ -19,6 +19,7 @@ import { useToast } from '../../contexts/ToastContext';
 
 export default function SyncSO() {
   const [sos, setSos] = useState<any[]>([]);
+  const [totalRows, setTotalRows] = useState(0);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [reserving, setReserving] = useState<number | null>(null);
@@ -95,8 +96,23 @@ export default function SyncSO() {
   const loadSOs = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/outbound/sales-orders');
-      setSos(res.data);
+      const res = await api.get('/outbound/sales-orders', {
+        params: {
+          page: pagination.page,
+          limit: pagination.rowsPerPage,
+          search: searchQuery,
+          status: statusFilter,
+          startDate: startDate,
+          endDate: endDate
+        }
+      });
+      if (res.data && res.data.items !== undefined) {
+        setSos(res.data.items);
+        setTotalRows(res.data.total);
+      } else {
+        setSos(res.data || []);
+        setTotalRows(res.data ? res.data.length : 0);
+      }
       setLoading(false);
     } catch (err) {
       setError('Failed to fetch sales order queue.');
@@ -106,8 +122,8 @@ export default function SyncSO() {
 
   const loadLookups = async () => {
     try {
-      const itemsRes = await api.get('/masters/items');
-      setItemsList(itemsRes.data);
+      const itemsRes = await api.get('/masters/items?lightweight=true');
+      setItemsList(itemsRes.data.items || itemsRes.data || []);
       const customersRes = await api.get('/masters/customers');
       setCustomersList(customersRes.data);
     } catch (err) {
@@ -115,10 +131,15 @@ export default function SyncSO() {
     }
   };
 
+  // Mount effect for static lookups
   useEffect(() => {
-    loadSOs();
     loadLookups();
   }, []);
+
+  // Reactive dependency effect to fetch SO data
+  useEffect(() => {
+    loadSOs();
+  }, [pagination.page, pagination.rowsPerPage, searchQuery, statusFilter, startDate, endDate]);
 
   const triggerSync = async () => {
     setSyncing(true);
@@ -245,31 +266,9 @@ export default function SyncSO() {
     setDeleteTarget(null);
   };
 
-  // Filtered + Searched data
-  const filteredSOs = useMemo(() => {
-    let data = sos;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      data = data.filter((so: any) =>
-        so.SOCode?.toLowerCase().includes(q) ||
-        so.CustomerName?.toLowerCase().includes(q) ||
-        so.CustomerCode?.toLowerCase().includes(q) ||
-        so.Salesman?.toLowerCase().includes(q)
-      );
-    }
-    if (statusFilter) {
-      data = data.filter((so: any) => so.Status === statusFilter);
-    }
-    if (startDate) {
-      data = data.filter((so: any) => so.OrderDate >= startDate);
-    }
-    if (endDate) {
-      data = data.filter((so: any) => so.OrderDate <= endDate + 'T23:59:59');
-    }
-    return data;
-  }, [sos, searchQuery, statusFilter, startDate, endDate]);
-
-  const paginatedSOs = pagination.paginate(filteredSOs);
+  // Server-side handled data
+  const filteredSOs = sos;
+  const paginatedSOs = sos;
 
   const handleExportCSV = () => {
     exportToCSV(filteredSOs, [
@@ -445,7 +444,7 @@ export default function SyncSO() {
           </Button>
         )}
         <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-          {filteredSOs.length} of {sos.length} SOs
+          Total: {totalRows} Sales Orders
         </Typography>
       </Box>
 
@@ -521,7 +520,7 @@ export default function SyncSO() {
           )}
           </TableContainer>
           <TablePaginationBar
-            count={filteredSOs.length}
+            count={totalRows}
             page={pagination.page}
             rowsPerPage={pagination.rowsPerPage}
             onPageChange={pagination.setPage}

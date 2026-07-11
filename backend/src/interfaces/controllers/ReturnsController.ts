@@ -147,64 +147,56 @@ export class ReturnsController {
       const finalBinId = qcBinId || ret.BinId;
 
       if (qcPassed) {
-        if (ret.Type === 'VENDOR') {
-          // If Vendor Return is successfully processed, since it was already deducted on receipt,
-          // we do not need to restock it or modify bin occupancy.
+        // Restock to inventory
+        const existing = await db.query(`
+          SELECT InventoryId FROM tblInventory 
+          WHERE BinId = @binId AND ItemId = @itemId 
+            AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
+        `, { binId: finalBinId, itemId: ret.ItemId, batchId: ret.BatchId });
+
+        if (existing.length > 0) {
           await db.executeCmd(`
-            UPDATE tblReturns SET Status = 'RESTOCKED', InventoryUpdated = 1 WHERE ReturnId = @returnId
-          `, { returnId });
+            UPDATE tblInventory SET Quantity = Quantity + @qty, UpdatedAt = CURRENT_TIMESTAMP
+            WHERE InventoryId = @invId
+          `, { qty: ret.Quantity, invId: existing[0].InventoryId });
         } else {
-          // CUSTOMER return: restock to inventory
-          const existing = await db.query(`
-            SELECT InventoryId FROM tblInventory 
-            WHERE BinId = @binId AND ItemId = @itemId 
-              AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
-          `, { binId: finalBinId, itemId: ret.ItemId, batchId: ret.BatchId });
+          // Get Warehouse/Zone details for destination bin
+          const binLocation = await db.query(`
+            SELECT z.WarehouseId, z.ZoneId FROM tblBin b
+            INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
+            INNER JOIN tblRack r ON s.RackId = r.RackId
+            INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
+            WHERE b.BinId = @binId
+          `, { binId: finalBinId });
 
-          if (existing.length > 0) {
-            await db.executeCmd(`
-              UPDATE tblInventory SET Quantity = Quantity + @qty, UpdatedAt = CURRENT_TIMESTAMP
-              WHERE InventoryId = @invId
-            `, { qty: ret.Quantity, invId: existing[0].InventoryId });
-          } else {
-            // Get Warehouse/Zone details for destination bin
-            const binLocation = await db.query(`
-              SELECT z.WarehouseId, z.ZoneId FROM tblBin b
-              INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
-              INNER JOIN tblRack r ON s.RackId = r.RackId
-              INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
-              WHERE b.BinId = @binId
-            `, { binId: finalBinId });
-
-            const warehouseId = binLocation.length > 0 ? binLocation[0].WarehouseId : 1;
-            const zoneId = binLocation.length > 0 ? binLocation[0].ZoneId : 1;
-
-            await db.executeCmd(`
-              INSERT INTO tblInventory (WarehouseId, ZoneId, BinId, ItemId, BatchId, Quantity, ReservedQty, UpdatedAt)
-              VALUES (@warehouseId, @zoneId, @binId, @itemId, @batchId, @qty, 0.0, CURRENT_TIMESTAMP)
-            `, { warehouseId, zoneId, binId: finalBinId, itemId: ret.ItemId, batchId: ret.BatchId, qty: ret.Quantity });
-          }
-
-          // Update Bin capacity weight/volume
-          const items = await db.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId: ret.ItemId });
-          const itemWeight = items.length > 0 && items[0].Weight !== null && Number(items[0].Weight) > 0 ? Number(items[0].Weight) : 2.0;
-          const itemVolume = items.length > 0 && items[0].Volume !== null && Number(items[0].Volume) > 0 ? Number(items[0].Volume) : 1.5;
-
-          const weightDelta = ret.Quantity * itemWeight;
-          const volumeDelta = ret.Quantity * itemVolume;
+          const warehouseId = binLocation.length > 0 ? binLocation[0].WarehouseId : 1;
+          const zoneId = binLocation.length > 0 ? binLocation[0].ZoneId : 1;
 
           await db.executeCmd(`
-            UPDATE tblBin
-            SET OccupiedWeight = OccupiedWeight + @weightDelta,
-                OccupiedVolume = OccupiedVolume + @volumeDelta
-            WHERE BinId = @binId
-          `, { weightDelta, volumeDelta, binId: finalBinId });
-
-          // Update Return row status
-          await db.executeCmd(`
-            UPDATE tblReturns SET Status = 'RESTOCKED', InventoryUpdated = 1 WHERE ReturnId = @returnId
-          `, { returnId });
+            INSERT INTO tblInventory (WarehouseId, ZoneId, BinId, ItemId, BatchId, Quantity, ReservedQty, UpdatedAt)
+            VALUES (@warehouseId, @zoneId, @binId, @itemId, @batchId, @qty, 0.0, CURRENT_TIMESTAMP)
+          `, { warehouseId, zoneId, binId: finalBinId, itemId: ret.ItemId, batchId: ret.BatchId, qty: ret.Quantity });
         }
+
+        // Update Bin capacity weight/volume
+        const items = await db.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId: ret.ItemId });
+        const itemWeight = items.length > 0 && items[0].Weight !== null && Number(items[0].Weight) > 0 ? Number(items[0].Weight) : 2.0;
+        const itemVolume = items.length > 0 && items[0].Volume !== null && Number(items[0].Volume) > 0 ? Number(items[0].Volume) : 1.5;
+
+        const weightDelta = ret.Quantity * itemWeight;
+        const volumeDelta = ret.Quantity * itemVolume;
+
+        await db.executeCmd(`
+          UPDATE tblBin
+          SET OccupiedWeight = OccupiedWeight + @weightDelta,
+              OccupiedVolume = OccupiedVolume + @volumeDelta
+          WHERE BinId = @binId
+        `, { weightDelta, volumeDelta, binId: finalBinId });
+
+        // Update Return row status
+        await db.executeCmd(`
+          UPDATE tblReturns SET Status = 'RESTOCKED', InventoryUpdated = 1 WHERE ReturnId = @returnId
+        `, { returnId });
 
       } else {
         // QC Rejected: Move directly to Damaged Stock

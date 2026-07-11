@@ -132,6 +132,7 @@ app.delete('/api/masters/customers/:id', authenticateJWT, requirePermission('Mas
 app.get('/api/inbound/pending-pos', authenticateJWT, requirePermission('Inbound', 'read'), GrnController.getPendingPOs);
 app.get('/api/inbound/po-details/:poId', authenticateJWT, requirePermission('Inbound', 'read'), GrnController.getPODetails);
 app.post('/api/inbound/grn', authenticateJWT, requirePermission('Inbound', 'create'), GrnController.createGRN);
+app.post('/api/inbound/grn/sync/:grnId', authenticateJWT, requirePermission('Inbound', 'create'), GrnController.syncGRNToERP);
 app.get('/api/inbound/grns', authenticateJWT, requirePermission('Inbound', 'read'), GrnController.getGRNs);
 app.get('/api/inbound/grn-details/:grnId', authenticateJWT, requirePermission('Inbound', 'read'), GrnController.getGRNDetails);
 app.post('/api/inbound/qc', authenticateJWT, requirePermission('Inbound', 'create'), GrnController.processQC);
@@ -258,6 +259,7 @@ app.get('/api/reports/stock', authenticateJWT, ReportController.getStockReport);
 app.get('/api/reports/audit-logs', authenticateJWT, ReportController.getAuditLogs);
 app.get('/api/reports/pending-so', authenticateJWT, ReportController.getPendingSOReport);
 app.get('/api/reports/pending-po', authenticateJWT, ReportController.getPendingPOReport);
+app.get('/api/reports/created-grns', authenticateJWT, ReportController.getCreatedGRNsReport);
 app.get('/api/reports/po-grn-history/:poId', authenticateJWT, ReportController.getPOGrnHistory);
 app.get('/api/reports/so-dispatch-history/:soId', authenticateJWT, ReportController.getSODispatchHistory);
 app.get('/api/reports/bin-capacity', authenticateJWT, ReportController.getBinCapacities);

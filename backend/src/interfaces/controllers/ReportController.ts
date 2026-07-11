@@ -1108,6 +1108,60 @@ export class ReportController {
     }
   }
 
+  public static async getCreatedGRNsReport(req: AuthenticatedRequest, res: Response) {
+    const search = req.query.search as string;
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
+    try {
+      let baseQuery = `
+        FROM tblGRN g
+        LEFT JOIN tblPurchaseOrder po ON g.POId = po.POId
+        INNER JOIN tblUser u ON g.ReceivedBy = u.UserId
+        WHERE 1=1
+      `;
+      const params: any = {};
+
+      if (startDate) {
+        baseQuery += ` AND g.ReceivedDate >= @startDate`;
+        params.startDate = startDate;
+      }
+
+      if (endDate) {
+        baseQuery += ` AND g.ReceivedDate <= @endDate`;
+        params.endDate = `${endDate} 23:59:59`;
+      }
+
+      if (search) {
+        baseQuery += ` AND (g.GRNCode LIKE @search OR po.POCode LIKE @search OR g.InvoiceNo LIKE @search OR u.FullName LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
+        SELECT g.GRNId, g.GRNCode, g.ReceivedDate, g.InvoiceNo, g.Status, g.IsSynced,
+               po.POCode, u.FullName AS OperatorName
+        ${baseQuery}
+        ORDER BY g.GRNId DESC
+        LIMIT @limit OFFSET @offset
+      `;
+      params.limit = limit;
+      params.offset = offset;
+
+      const rows = await db.query(dataQuery, params);
+      return res.json({ items: rows, total });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
   public static async getPOGrnHistory(req: AuthenticatedRequest, res: Response) {
     const { poId } = req.params;
     try {

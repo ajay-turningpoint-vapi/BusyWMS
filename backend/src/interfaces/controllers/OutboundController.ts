@@ -10,8 +10,67 @@ export class OutboundController {
   // ==========================================
   public static async getSalesOrders(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query('SELECT * FROM tblSalesOrder ORDER BY OrderDate DESC, SOId DESC');
-      return res.json(rows);
+      const page = parseInt(req.query.page as string || '0', 10);
+      const limit = parseInt(req.query.limit as string || '25', 10);
+      const search = (req.query.search as string || '').trim();
+      const status = (req.query.status as string || '').trim();
+      const startDate = (req.query.startDate as string || '').trim();
+      const endDate = (req.query.endDate as string || '').trim();
+
+      let whereClause = 'WHERE 1=1';
+      const params: Record<string, any> = {};
+
+      if (search) {
+        whereClause += ' AND (SOCode LIKE @searchPattern OR CustomerName LIKE @searchPattern OR CustomerCode LIKE @searchPattern OR Salesman LIKE @searchPattern)';
+        params.searchPattern = `%${search}%`;
+      }
+
+      if (status) {
+        whereClause += ' AND Status = @status';
+        params.status = status;
+      }
+
+      if (startDate) {
+        whereClause += ' AND OrderDate >= @startDate';
+        params.startDate = startDate;
+      }
+
+      if (endDate) {
+        whereClause += ' AND OrderDate <= @endDate';
+        params.endDate = endDate + ' 23:59:59';
+      }
+
+      const isPaginated = req.query.page !== undefined;
+
+      if (isPaginated) {
+        const offset = page * limit;
+        params.limit = limit;
+        params.offset = offset;
+
+        // Query total
+        const countQuery = `SELECT COUNT(*) AS total FROM tblSalesOrder ${whereClause}`;
+        const countRows = await db.query(countQuery, params);
+        const total = countRows.length > 0 ? countRows[0].total : 0;
+
+        // Query paginated
+        const selectQuery = `
+          SELECT * FROM tblSalesOrder 
+          ${whereClause} 
+          ORDER BY OrderDate DESC, SOId DESC 
+          LIMIT @limit OFFSET @offset
+        `;
+        const items = await db.query(selectQuery, params);
+
+        return res.json({ items, total });
+      } else {
+        const selectQuery = `
+          SELECT * FROM tblSalesOrder 
+          ${whereClause} 
+          ORDER BY OrderDate DESC, SOId DESC
+        `;
+        const items = await db.query(selectQuery, params);
+        return res.json(items);
+      }
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
