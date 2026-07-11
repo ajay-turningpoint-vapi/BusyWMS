@@ -193,35 +193,105 @@ export class ReportController {
 
   // Reports compilation
   public static async getStockReport(req: AuthenticatedRequest, res: Response) {
+    const search = req.query.search as string;
+    const warehouseCode = req.query.warehouseCode as string;
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
     try {
-      const rows = await db.query(`
-        SELECT i.InventoryId, w.Code AS WarehouseCode, z.Code AS ZoneCode, b.Code AS BinCode, 
-               item.Code AS ItemCode, item.Name AS ItemName, item.Category, item.UOM,
-               batch.BatchNumber, i.Quantity, i.ReservedQty, (i.Quantity - i.ReservedQty) AS AvailableQty
+      let query = `
         FROM tblInventory i
         INNER JOIN tblWarehouse w ON i.WarehouseId = w.WarehouseId
         INNER JOIN tblZone z ON i.ZoneId = z.ZoneId
         INNER JOIN tblBin b ON i.BinId = b.BinId
         INNER JOIN tblItem item ON i.ItemId = item.ItemId
         LEFT JOIN tblBatch batch ON i.BatchId = batch.BatchId
-      `);
-      return res.json(rows);
+        WHERE 1=1
+      `;
+      const params: any = {};
+
+      if (warehouseCode) {
+        query += ` AND w.Code = @warehouseCode`;
+        params.warehouseCode = warehouseCode;
+      }
+
+      if (search) {
+        query += ` AND (item.Code LIKE @search OR item.Name LIKE @search OR b.Code LIKE @search OR batch.BatchNumber LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${query}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
+        SELECT i.InventoryId, w.Code AS WarehouseCode, z.Code AS ZoneCode, b.Code AS BinCode, 
+               item.Code AS ItemCode, item.Name AS ItemName, item.Category, item.UOM,
+               batch.BatchNumber, i.Quantity, i.ReservedQty, (i.Quantity - i.ReservedQty) AS AvailableQty
+        ${query}
+        ORDER BY i.InventoryId DESC
+        LIMIT @limit OFFSET @offset
+      `;
+      params.limit = limit;
+      params.offset = offset;
+
+      const rows = await db.query(dataQuery, params);
+      return res.json({ items: rows, total });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
   }
 
   public static async getAuditLogs(req: AuthenticatedRequest, res: Response) {
+    const search = req.query.search as string;
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
     try {
-      const rows = await db.query(`
+      let baseQuery = `
+        FROM tblAuditLog a
+        LEFT JOIN tblUser u ON a.UserId = u.UserId
+        WHERE 1=1
+      `;
+      const params: any = {};
+
+      if (startDate) {
+        baseQuery += ` AND a.Timestamp >= @startDate`;
+        params.startDate = startDate;
+      }
+
+      if (endDate) {
+        baseQuery += ` AND a.Timestamp <= @endDate`;
+        params.endDate = `${endDate} 23:59:59`;
+      }
+
+      if (search) {
+        baseQuery += ` AND (u.Username LIKE @search OR a.Action LIKE @search OR a.TableName LIKE @search OR a.IPAddress LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
         SELECT a.AuditId, a.UserId, a.Action, a.TableName, a.RecordId, 
                a.OldValues, a.NewValues, a.IPAddress, a.Timestamp,
                COALESCE(u.Username, 'SYSTEM') AS Username
-        FROM tblAuditLog a
-        LEFT JOIN tblUser u ON a.UserId = u.UserId
-        ORDER BY a.AuditId DESC LIMIT 500
-      `);
-      return res.json(rows);
+        ${baseQuery}
+        ORDER BY a.AuditId DESC
+        LIMIT @limit OFFSET @offset
+      `;
+      params.limit = limit;
+      params.offset = offset;
+
+      const rows = await db.query(dataQuery, params);
+      return res.json({ items: rows, total });
     } catch (err: any) {
       console.error('Audit logs fetch error:', err);
       return res.status(500).json({ message: err.message });
@@ -819,12 +889,19 @@ export class ReportController {
   }
 
   public static async getPendingSOReport(req: AuthenticatedRequest, res: Response) {
+    const search = req.query.search as string;
+    const warehouseCode = req.query.warehouseCode as string;
+    const status = req.query.status as string;
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    const excludeCompleted = req.query.excludeCompleted === 'true';
+    
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
     try {
-      const rows = await db.query(`
-        SELECT so.SOId, so.SOCode, so.OrderDate, so.CustomerName, so.CustomerCode,
-               sod.SODetailId, sod.ItemId, sod.OrderQty, sod.ShippedQty, sod.UOM,
-               item.Code AS ItemCode, item.Name AS ItemName,
-               COALESCE(w.Code, 'WH-DEL') AS WarehouseCode
+      let baseQuery = `
         FROM tblSalesOrder so
         INNER JOIN tblSalesOrderDetail sod ON so.SOId = sod.SOId
         INNER JOIN tblItem item ON sod.ItemId = item.ItemId
@@ -838,9 +915,60 @@ export class ReportController {
             INNER JOIN tblWarehouse wh ON z.WarehouseId = wh.WarehouseId
         ) w ON so.SOId = w.SOId
         WHERE so.Status != 'CANCELLED'
+      `;
+      const params: any = {};
+
+      if (warehouseCode) {
+        baseQuery += ` AND w.Code = @warehouseCode`;
+        params.warehouseCode = warehouseCode;
+      }
+
+      if (startDate) {
+        baseQuery += ` AND so.OrderDate >= @startDate`;
+        params.startDate = startDate;
+      }
+
+      if (endDate) {
+        baseQuery += ` AND so.OrderDate <= @endDate`;
+        params.endDate = `${endDate} 23:59:59`;
+      }
+
+      if (search) {
+        baseQuery += ` AND (so.SOCode LIKE @search OR so.CustomerName LIKE @search OR item.Code LIKE @search OR item.Name LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      if (status) {
+        if (status === 'Pending') {
+          baseQuery += ` AND sod.ShippedQty = 0`;
+        } else if (status === 'Partially Dispatched') {
+          baseQuery += ` AND sod.ShippedQty > 0 AND sod.OrderQty > sod.ShippedQty`;
+        } else if (status === 'Fully Dispatched') {
+          baseQuery += ` AND sod.OrderQty <= sod.ShippedQty`;
+        }
+      }
+
+      if (excludeCompleted && !status) {
+        baseQuery += ` AND sod.OrderQty > sod.ShippedQty`;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
+        SELECT so.SOId, so.SOCode, so.OrderDate, so.CustomerName, so.CustomerCode,
+               sod.SODetailId, sod.ItemId, sod.OrderQty, sod.ShippedQty, sod.UOM,
+               item.Code AS ItemCode, item.Name AS ItemName,
+               COALESCE(w.Code, 'WH-DEL') AS WarehouseCode
+        ${baseQuery}
         ORDER BY so.OrderDate DESC, so.SOId DESC
-      `);
-      
+        LIMIT @limit OFFSET @offset
+      `;
+      params.limit = limit;
+      params.offset = offset;
+
+      const rows = await db.query(dataQuery, params);
       const processed = rows.map((row: any) => {
         const orderDate = new Date(row.OrderDate);
         orderDate.setHours(0, 0, 0, 0);
@@ -850,32 +978,39 @@ export class ReportController {
         const ageingDays = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
         const pendingQty = Math.max(0, row.OrderQty - row.ShippedQty);
         
-        let status = 'Pending';
+        let rowStatus = 'Pending';
         if (row.ShippedQty > 0) {
-          status = pendingQty === 0 ? 'Fully Dispatched' : 'Partially Dispatched';
+          rowStatus = pendingQty === 0 ? 'Fully Dispatched' : 'Partially Dispatched';
         }
         
         return {
           ...row,
           PendingQty: pendingQty,
           AgeingDays: ageingDays,
-          Status: status
+          Status: rowStatus
         };
       });
 
-      return res.json(processed);
+      return res.json({ items: processed, total });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
   }
 
   public static async getPendingPOReport(req: AuthenticatedRequest, res: Response) {
+    const search = req.query.search as string;
+    const warehouseCode = req.query.warehouseCode as string;
+    const status = req.query.status as string;
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    const excludeCompleted = req.query.excludeCompleted === 'true';
+    
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
     try {
-      const rows = await db.query(`
-        SELECT po.POId, po.POCode, po.OrderDate, po.VendorName, po.VendorCode,
-               pod.PODetailId, pod.ItemId, pod.OrderQty, pod.ReceivedQty, pod.UOM,
-               item.Code AS ItemCode, item.Name AS ItemName,
-               COALESCE(w.Code, 'WH-DEL') AS WarehouseCode
+      let baseQuery = `
         FROM tblPurchaseOrder po
         INNER JOIN tblPurchaseOrderDetail pod ON po.POId = pod.POId
         INNER JOIN tblItem item ON pod.ItemId = item.ItemId
@@ -891,9 +1026,60 @@ export class ReportController {
             INNER JOIN tblWarehouse wh ON z.WarehouseId = wh.WarehouseId
         ) w ON po.POId = w.POId
         WHERE po.Status != 'CANCELLED'
-        ORDER BY po.OrderDate DESC, po.POId DESC
-      `);
+      `;
+      const params: any = {};
 
+      if (warehouseCode) {
+        baseQuery += ` AND w.Code = @warehouseCode`;
+        params.warehouseCode = warehouseCode;
+      }
+
+      if (startDate) {
+        baseQuery += ` AND po.OrderDate >= @startDate`;
+        params.startDate = startDate;
+      }
+
+      if (endDate) {
+        baseQuery += ` AND po.OrderDate <= @endDate`;
+        params.endDate = `${endDate} 23:59:59`;
+      }
+
+      if (search) {
+        baseQuery += ` AND (po.POCode LIKE @search OR po.VendorName LIKE @search OR item.Code LIKE @search OR item.Name LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      if (status) {
+        if (status === 'Pending') {
+          baseQuery += ` AND pod.ReceivedQty = 0`;
+        } else if (status === 'Partially Received') {
+          baseQuery += ` AND pod.ReceivedQty > 0 AND pod.OrderQty > pod.ReceivedQty`;
+        } else if (status === 'Fully Received') {
+          baseQuery += ` AND pod.OrderQty <= pod.ReceivedQty`;
+        }
+      }
+
+      if (excludeCompleted && !status) {
+        baseQuery += ` AND pod.OrderQty > pod.ReceivedQty`;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
+        SELECT po.POId, po.POCode, po.OrderDate, po.VendorName, po.VendorCode,
+               pod.PODetailId, pod.ItemId, pod.OrderQty, pod.ReceivedQty, pod.UOM,
+               item.Code AS ItemCode, item.Name AS ItemName,
+               COALESCE(w.Code, 'WH-DEL') AS WarehouseCode
+        ${baseQuery}
+        ORDER BY po.OrderDate DESC, po.POId DESC
+        LIMIT @limit OFFSET @offset
+      `;
+      params.limit = limit;
+      params.offset = offset;
+
+      const rows = await db.query(dataQuery, params);
       const processed = rows.map((row: any) => {
         const orderDate = new Date(row.OrderDate);
         orderDate.setHours(0, 0, 0, 0);
@@ -903,20 +1089,20 @@ export class ReportController {
         const ageingDays = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)));
         const pendingQty = Math.max(0, row.OrderQty - row.ReceivedQty);
         
-        let status = 'Pending';
+        let rowStatus = 'Pending';
         if (row.ReceivedQty > 0) {
-          status = pendingQty === 0 ? 'Fully Received' : 'Partially Received';
+          rowStatus = pendingQty === 0 ? 'Fully Received' : 'Partially Received';
         }
         
         return {
           ...row,
           PendingQty: pendingQty,
           AgeingDays: ageingDays,
-          Status: status
+          Status: rowStatus
         };
       });
 
-      return res.json(processed);
+      return res.json({ items: processed, total });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -954,10 +1140,73 @@ export class ReportController {
     }
   }
 
-  // Get Bin capacities management report
   public static async getBinCapacities(req: AuthenticatedRequest, res: Response) {
+    const search = req.query.search as string;
+    const warehouseCode = req.query.warehouseCode as string;
+    const zone = req.query.zone as string;
+    const binCode = req.query.binCode as string;
+    const itemGroup = req.query.itemGroup as string;
+    const minCapacity = parseFloat(req.query.minCapacity as string || '0');
+    const emptyBinsOnly = req.query.emptyBinsOnly === 'true';
+
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
     try {
-      const rows = await db.query(`
+      let baseQuery = `
+        FROM tblBin b
+        INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
+        INNER JOIN tblRack r ON s.RackId = r.RackId
+        INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
+        INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
+        WHERE 1=1
+      `;
+      const params: any = {};
+
+      if (warehouseCode) {
+        baseQuery += ` AND w.Code = @warehouseCode`;
+        params.warehouseCode = warehouseCode;
+      }
+
+      if (zone) {
+        baseQuery += ` AND (z.Code = @zone OR z.Name = @zone)`;
+        params.zone = zone;
+      }
+
+      if (binCode) {
+        baseQuery += ` AND b.Code LIKE @binCode`;
+        params.binCode = `%${binCode}%`;
+      }
+
+      if (emptyBinsOnly) {
+        baseQuery += ` AND b.OccupiedVolume = 0 AND b.OccupiedWeight = 0`;
+      }
+
+      if (minCapacity > 0) {
+        baseQuery += ` AND (b.CapacityWeight - b.OccupiedWeight >= @minCapacity OR b.CapacityVolume - b.OccupiedVolume >= @minCapacity)`;
+        params.minCapacity = minCapacity;
+      }
+
+      if (search) {
+        baseQuery += ` AND (b.Code LIKE @search OR b.Barcode LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      if (itemGroup) {
+        baseQuery += ` AND EXISTS (
+          SELECT 1 FROM tblInventory i
+          INNER JOIN tblItem itm ON i.ItemId = itm.ItemId
+          WHERE i.BinId = b.BinId AND i.Quantity > 0 AND itm.Category LIKE @itemGroup
+        )`;
+        params.itemGroup = `%${itemGroup}%`;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
         SELECT 
           b.BinId,
           b.Code AS BinCode,
@@ -985,28 +1234,27 @@ export class ReportController {
             WHEN b.CapacityWeight > 0 THEN ROUND((b.OccupiedWeight / b.CapacityWeight) * 100, 2)
             ELSE 0.00
           END AS WeightOccupancyPercent,
-          -- Get currently stored items names (joined list)
           (
             SELECT GROUP_CONCAT(DISTINCT CONCAT(itm.Name, ' (', itm.Code, ')') SEPARATOR ', ')
             FROM tblInventory i
             INNER JOIN tblItem itm ON i.ItemId = itm.ItemId
             WHERE i.BinId = b.BinId AND i.Quantity > 0
           ) AS CurrentItems,
-          -- Get categories of currently stored items
           (
             SELECT GROUP_CONCAT(DISTINCT itm.Category SEPARATOR ', ')
             FROM tblInventory i
             INNER JOIN tblItem itm ON i.ItemId = itm.ItemId
             WHERE i.BinId = b.BinId AND i.Quantity > 0
           ) AS CurrentCategories
-        FROM tblBin b
-        INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
-        INNER JOIN tblRack r ON s.RackId = r.RackId
-        INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
-        INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
+        ${baseQuery}
         ORDER BY b.Code ASC
-      `);
-      return res.json(rows);
+        LIMIT @limit OFFSET @offset
+      `;
+      params.limit = limit;
+      params.offset = offset;
+
+      const rows = await db.query(dataQuery, params);
+      return res.json({ items: rows, total });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }

@@ -3,9 +3,9 @@ import {
   Box, Typography, Button, Card, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, CircularProgress, Alert, 
   Chip, Grid, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, 
-  ListItemText, Divider, Autocomplete, TextField, Switch, FormControlLabel, IconButton
+  ListItemText, Divider, Autocomplete, TextField, Switch, FormControlLabel, IconButton, InputAdornment
 } from '@mui/material';
-import { RefreshCw, CheckCircle2, XCircle, Play, ShoppingCart, Plus, Edit2, Trash2, X, PlusCircle, FileDown } from 'lucide-react';
+import { RefreshCw, CheckCircle2, XCircle, Play, ShoppingCart, Plus, Edit2, Trash2, X, PlusCircle, FileDown, Search } from 'lucide-react';
 import api from '../../services/api';
 import TransactionLink from '../../components/TransactionLink';
 import { useAuthStore } from '../../store/authStore';
@@ -33,10 +33,35 @@ export default function SyncSO() {
 
   // Search, Filter, Pagination state
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [statusInput, setStatusInput] = useState('');
   const [startDate, setStartDate] = useState('');
+  const [startDateInput, setStartDateInput] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [endDateInput, setEndDateInput] = useState('');
   const pagination = usePagination(25);
+
+  const handleSearch = () => {
+    setSearchQuery(searchInput);
+    setStatusFilter(statusInput);
+    setStartDate(startDateInput);
+    setEndDate(endDateInput);
+    pagination.resetPage();
+  };
+
+  const handleClear = () => {
+    setSearchInput('');
+    setStatusInput('');
+    setStartDateInput('');
+    setEndDateInput('');
+
+    setSearchQuery('');
+    setStatusFilter('');
+    setStartDate('');
+    setEndDate('');
+    pagination.resetPage();
+  };
 
   // Confirm dialog state
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -377,10 +402,24 @@ export default function SyncSO() {
 
       {/* Search, Filter & Date Range Bar */}
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-        <SearchBar value={searchQuery} onChange={(v) => { setSearchQuery(v); pagination.resetPage(); }} placeholder="Search SO, Customer..." />
+        <TextField
+          size="small"
+          placeholder="Search SO, Customer..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+          sx={{ minWidth: 220 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search size={16} color="#888" />
+              </InputAdornment>
+            ),
+          }}
+        />
         <StatusFilter
-          value={statusFilter}
-          onChange={(v) => { setStatusFilter(v); pagination.resetPage(); }}
+          value={statusInput}
+          onChange={(v) => setStatusInput(v)}
           options={[
             { value: 'PENDING', label: 'Pending' },
             { value: 'RESERVED', label: 'Reserved' },
@@ -392,11 +431,19 @@ export default function SyncSO() {
           ]}
         />
         <DateRangeFilter
-          startDate={startDate}
-          endDate={endDate}
-          onStartDateChange={(v) => { setStartDate(v); pagination.resetPage(); }}
-          onEndDateChange={(v) => { setEndDate(v); pagination.resetPage(); }}
+          startDate={startDateInput}
+          endDate={endDateInput}
+          onStartDateChange={(v) => setStartDateInput(v)}
+          onEndDateChange={(v) => setEndDateInput(v)}
         />
+        <Button variant="contained" onClick={handleSearch} sx={{ fontWeight: 600 }}>
+          Search
+        </Button>
+        {(searchInput || statusInput || startDateInput || endDateInput || searchQuery || statusFilter || startDate || endDate) && (
+          <Button variant="outlined" color="secondary" onClick={handleClear} sx={{ fontWeight: 600 }}>
+            Clear
+          </Button>
+        )}
         <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
           {filteredSOs.length} of {sos.length} SOs
         </Typography>

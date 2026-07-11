@@ -6,7 +6,7 @@ import {
   Select, MenuItem, FormControl, InputLabel, CircularProgress, 
   Alert, Grid, InputAdornment, Chip, Dialog, DialogTitle, 
   DialogContent, DialogActions, FormControlLabel, Checkbox, 
-  Paper, IconButton, Tooltip, Slider
+  Paper, IconButton, Tooltip, Slider, Autocomplete
 } from '@mui/material';
 import { FileDown, Search, Filter, RefreshCw, Calendar, Printer, History, Eye, Sliders, Settings } from 'lucide-react';
 import api from '../../services/api';
@@ -79,29 +79,87 @@ export default function Reports() {
   const [tabValue, setTabValue] = useState(tabParam ? parseInt(tabParam, 10) : 0);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any[]>([]);
+  const [totalRows, setTotalRows] = useState(0);
   
-  // Filtering States
+  // Filtering States (Applied)
   const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [customerFilter, setCustomerFilter] = useState('');
-  const [vendorFilter, setVendorFilter] = useState('');
-  const [itemFilter, setItemFilter] = useState('');
   const [warehouseFilter, setWarehouseFilter] = useState('');
-  const [branchFilter, setBranchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [orderNoFilter, setOrderNoFilter] = useState('');
   const [excludeCompleted, setExcludeCompleted] = useState(true);
   
-  // Bin capacity filters
+  // Bin capacity filters (Applied)
   const [zoneFilter, setZoneFilter] = useState('');
   const [binFilter, setBinFilter] = useState('');
   const [itemGroupFilter, setItemGroupFilter] = useState('');
   const [availableCapacityMin, setAvailableCapacityMin] = useState('');
   const [emptyBinsOnly, setEmptyBinsOnly] = useState(false);
-  
+
+  // Input States (Typing/Selecting)
+  const [searchInput, setSearchInput] = useState('');
+  const [startDateInput, setStartDateInput] = useState('');
+  const [endDateInput, setEndDateInput] = useState('');
+  const [warehouseInput, setWarehouseInput] = useState('');
+  const [statusInput, setStatusInput] = useState('');
+  const [excludeCompletedInput, setExcludeCompletedInput] = useState(true);
+
+  // Bin capacity input states
+  const [zoneInput, setZoneInput] = useState('');
+  const [binInput, setBinInput] = useState('');
+  const [itemGroupInput, setItemGroupInput] = useState('');
+  const [availableCapacityMinInput, setAvailableCapacityMinInput] = useState('');
+  const [emptyBinsOnlyInput, setEmptyBinsOnlyInput] = useState(false);
+
   const [error, setError] = useState('');
   const pagination = usePagination(25);
+
+  const handleSearch = () => {
+    setSearchQuery(searchInput);
+    setStartDate(startDateInput);
+    setEndDate(endDateInput);
+    setWarehouseFilter(warehouseInput);
+    setStatusFilter(statusInput);
+    setExcludeCompleted(excludeCompletedInput);
+
+    setZoneFilter(zoneInput);
+    setBinFilter(binInput);
+    setItemGroupFilter(itemGroupInput);
+    setAvailableCapacityMin(availableCapacityMinInput);
+    setEmptyBinsOnly(emptyBinsOnlyInput);
+
+    pagination.resetPage();
+  };
+
+  const handleClear = () => {
+    setSearchInput('');
+    setStartDateInput('');
+    setEndDateInput('');
+    setWarehouseInput('');
+    setStatusInput('');
+    setExcludeCompletedInput(true);
+
+    setZoneInput('');
+    setBinInput('');
+    setItemGroupInput('');
+    setAvailableCapacityMinInput('');
+    setEmptyBinsOnlyInput(false);
+
+    setSearchQuery('');
+    setStartDate('');
+    setEndDate('');
+    setWarehouseFilter('');
+    setStatusFilter('');
+    setExcludeCompleted(true);
+
+    setZoneFilter('');
+    setBinFilter('');
+    setItemGroupFilter('');
+    setAvailableCapacityMin('');
+    setEmptyBinsOnly(false);
+
+    pagination.resetPage();
+  };
 
   // History Dialog States (Drill-down for Pending Quantity)
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
@@ -115,7 +173,10 @@ export default function Reports() {
   const [selectedLedgerRow, setSelectedLedgerRow] = useState<any>(null);
 
   // Barcode Management Tab States
+  const [itemsSearchQuery, setItemsSearchQuery] = useState('');
   const [itemsList, setItemsList] = useState<any[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [selectedItemObject, setSelectedItemObject] = useState<any | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string>('');
   const [customText, setCustomText] = useState<string>('');
   const [customDesc, setCustomDesc] = useState<string>('');
@@ -148,7 +209,7 @@ export default function Reports() {
     }
     setLoading(true);
     setError('');
-    setData([]);
+    
     let endpoint = '/reports/stock';
     if (tabIndex === 1) endpoint = '/reports/pending-so';
     else if (tabIndex === 2) endpoint = '/reports/pending-po';
@@ -157,14 +218,59 @@ export default function Reports() {
     else if (tabIndex === 6) endpoint = '/inbound/asn/reports';
 
     try {
-      const res = await api.get(endpoint);
-      setData(res.data);
+      const res = await api.get(endpoint, {
+        params: {
+          page: pagination.page,
+          limit: pagination.rowsPerPage,
+          search: searchQuery,
+          startDate,
+          endDate,
+          warehouseCode: warehouseFilter,
+          status: statusFilter,
+          excludeCompleted,
+          zone: zoneFilter,
+          binCode: binFilter,
+          itemGroup: itemGroupFilter,
+          minCapacity: availableCapacityMin,
+          emptyBinsOnly,
+          asnReportView
+        }
+      });
+      
+      // The backend returns { items, total }
+      setData(res.data.items || []);
+      setTotalRows(res.data.total || 0);
       setLoading(false);
     } catch (err) {
       setError('Failed to fetch report data.');
       setLoading(false);
     }
   };
+
+  // Declarative unified reactive effect for data fetching
+  useEffect(() => {
+    if (tabValue === 4) {
+      setLoading(false);
+      return;
+    }
+    loadReport(tabValue);
+  }, [
+    tabValue,
+    pagination.page,
+    pagination.rowsPerPage,
+    searchQuery,
+    startDate,
+    endDate,
+    warehouseFilter,
+    statusFilter,
+    excludeCompleted,
+    zoneFilter,
+    binFilter,
+    itemGroupFilter,
+    availableCapacityMin,
+    emptyBinsOnly,
+    asnReportView
+  ]);
 
   useEffect(() => {
     if (tabParam !== null) {
@@ -176,34 +282,74 @@ export default function Reports() {
   }, [tabParam]);
 
   useEffect(() => {
-    loadReport(tabValue);
     pagination.resetPage();
-    // Reset page filters when switching tabs
+    // Reset inputs
+    setSearchInput('');
+    setStartDateInput('');
+    setEndDateInput('');
+    setWarehouseInput('');
+    setStatusInput('');
+    setExcludeCompletedInput(true);
+    setZoneInput('');
+    setBinInput('');
+    setItemGroupInput('');
+    setAvailableCapacityMinInput('');
+    setEmptyBinsOnlyInput(false);
+
+    // Reset applied filters
     setSearchQuery('');
     setStartDate('');
     setEndDate('');
-    setCustomerFilter('');
-    setVendorFilter('');
-    setItemFilter('');
+    setWarehouseFilter('');
     setStatusFilter('');
-    setOrderNoFilter('');
-    setBranchFilter('');
+    setExcludeCompleted(true);
+    setZoneFilter('');
+    setBinFilter('');
+    setItemGroupFilter('');
+    setAvailableCapacityMin('');
+    setEmptyBinsOnly(false);
   }, [tabValue]);
 
   useEffect(() => {
     pagination.resetPage();
   }, [asnReportView]);
 
-  // Load items catalogue and warehouses on mount
+  // Load warehouses on mount
   useEffect(() => {
-    api.get('/masters/items')
-      .then(res => setItemsList(res.data))
-      .catch(err => console.error('Failed to load items catalogue', err));
-
     api.get('/masters/warehouses')
       .then(res => setWarehouses(res.data))
       .catch(err => console.error('Failed to load warehouses', err));
   }, []);
+
+  // Async search items catalogue when typing in Barcode Label Generator search input (tab 4)
+  useEffect(() => {
+    if (tabValue !== 4) return;
+    if (!itemsSearchQuery.trim()) {
+      setItemsList([]);
+      return;
+    }
+    const delayDebounce = setTimeout(() => {
+      setItemsLoading(true);
+      api.get('/masters/items', {
+        params: {
+          search: itemsSearchQuery,
+          lightweight: true,
+          page: 0,
+          limit: 50
+        }
+      })
+        .then(res => {
+          const items = res.data.items || res.data || [];
+          setItemsList(items);
+          setItemsLoading(false);
+        })
+        .catch(err => {
+          console.error(err);
+          setItemsLoading(false);
+        });
+    }, 400); // 400ms debounce
+    return () => clearTimeout(delayDebounce);
+  }, [itemsSearchQuery, tabValue]);
 
   // Synchronize warehouse filter with active warehouse from navbar
   useEffect(() => {
@@ -217,17 +363,7 @@ export default function Reports() {
     }
   }, [user?.warehouseId, warehouses]);
 
-  const handleItemSelect = (itemId: string) => {
-    setSelectedItemId(itemId);
-    const itm = itemsList.find(i => String(i.ItemId) === String(itemId));
-    if (itm) {
-      setCustomText(itm.Code);
-      setCustomDesc(itm.Name);
-    } else {
-      setCustomText('');
-      setCustomDesc('');
-    }
-  };
+
 
   useEffect(() => {
     if (tabValue === 4) {
@@ -319,86 +455,8 @@ export default function Reports() {
     return tabValue === 6 ? getProcessedASNData() : filteredData;
   };
 
-  // Multi-field Filtering logic
-  const filteredData = data.filter((row: any) => {
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const matchText = (
-        (row.ItemName && row.ItemName.toLowerCase().includes(query)) ||
-        (row.ItemCode && row.ItemCode.toLowerCase().includes(query)) ||
-        (row.CustomerName && row.CustomerName.toLowerCase().includes(query)) ||
-        (row.VendorName && row.VendorName.toLowerCase().includes(query)) ||
-        (row.SOCode && row.SOCode.toLowerCase().includes(query)) ||
-        (row.POCode && row.POCode.toLowerCase().includes(query)) ||
-        (row.BinCode && row.BinCode.toLowerCase().includes(query)) ||
-        (row.BatchNumber && row.BatchNumber.toLowerCase().includes(query)) ||
-        (row.Action && row.Action.toLowerCase().includes(query)) ||
-        (row.TableName && row.TableName.toLowerCase().includes(query)) ||
-        (row.ASNNumber && row.ASNNumber.toLowerCase().includes(query)) ||
-        (row.Username && row.Username.toLowerCase().includes(query))
-      );
-      if (!matchText) return false;
-    }
-
-    const rowDateStr = row.OrderDate || row.Timestamp || row.ExpectedArrivalDate;
-    if (rowDateStr) {
-      const rowDate = new Date(rowDateStr);
-      if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        if (rowDate < start) return false;
-      }
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        if (rowDate > end) return false;
-      }
-    }
-
-    if (tabValue === 1 && customerFilter && row.CustomerName !== customerFilter) return false;
-    if (tabValue === 2 && vendorFilter && row.VendorName !== vendorFilter) return false;
-    
-    if (tabValue === 5 && itemFilter) {
-      if (!row.CurrentItems || !row.CurrentItems.toLowerCase().includes(itemFilter.toLowerCase())) return false;
-    } else if (tabValue !== 5 && itemFilter && row.ItemName !== itemFilter) {
-      return false;
-    }
-
-    if (warehouseFilter && row.WarehouseCode !== warehouseFilter) return false;
-    if (statusFilter) {
-      const rowStat = (row.Status || row.ASNStatus || '').toString().toLowerCase().replace(/_/g, ' ');
-      const filterStat = statusFilter.toString().toLowerCase().replace(/_/g, ' ');
-      if (rowStat !== filterStat) return false;
-    }
-    
-    if (tabValue === 5) {
-      if (zoneFilter && row.ZoneCode !== zoneFilter && row.ZoneName !== zoneFilter) return false;
-      if (binFilter && !row.BinCode.toLowerCase().includes(binFilter.toLowerCase())) return false;
-      if (itemGroupFilter && (!row.CurrentCategories || !row.CurrentCategories.toLowerCase().includes(itemGroupFilter.toLowerCase()))) return false;
-      if (emptyBinsOnly && row.BinStatus !== 'Empty') return false;
-      if (availableCapacityMin) {
-        const minCap = parseFloat(availableCapacityMin);
-        if (row.AvailableWeight < minCap && row.AvailableVolume < minCap) return false;
-      }
-    }
-
-    if (orderNoFilter) {
-      const orderNo = (row.SOCode || row.POCode || '').toLowerCase();
-      if (!orderNo.includes(orderNoFilter.toLowerCase())) return false;
-    }
-
-    if (branchFilter) {
-      const wh = warehouses.find(w => w.Name.split(' ')[0] === branchFilter);
-      if (wh && row.WarehouseCode !== wh.Code) return false;
-    }
-
-    if (excludeCompleted && !statusFilter) {
-      if (tabValue === 1 && row.Status === 'Fully Dispatched') return false;
-      if (tabValue === 2 && row.Status === 'Fully Received') return false;
-    }
-
-    return true;
-  });
+  // Multi-field Filtering logic (now handled on the server)
+  const filteredData = data;
 
   const finalReportData = getProcessedASNData();
 
@@ -758,8 +816,9 @@ export default function Reports() {
                   placeholder="Search by keywords..."
                   size="small"
                   fullWidth
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -779,8 +838,8 @@ export default function Reports() {
                   fullWidth
                   InputLabelProps={{ shrink: true }}
                   inputProps={{ max: new Date().toISOString().split('T')[0] }}
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  value={startDateInput}
+                  onChange={(e) => setStartDateInput(e.target.value)}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -797,10 +856,10 @@ export default function Reports() {
                   size="small"
                   fullWidth
                   InputLabelProps={{ shrink: true }}
-                  inputProps={{ max: new Date().toISOString().split('T')[0], min: startDate }}
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  disabled={!startDate}
+                  inputProps={{ max: new Date().toISOString().split('T')[0], min: startDateInput }}
+                  value={endDateInput}
+                  onChange={(e) => setEndDateInput(e.target.value)}
+                  disabled={!startDateInput}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -818,9 +877,9 @@ export default function Reports() {
                   <Select
                     labelId="warehouse-filter-label"
                     id="warehouse-filter-select"
-                    value={warehouseFilter}
+                    value={warehouseInput}
                     label="Warehouse"
-                    onChange={(e) => setWarehouseFilter(e.target.value)}
+                    onChange={(e) => setWarehouseInput(e.target.value)}
                   >
                     <MenuItem value="">All Warehouses</MenuItem>
                     {warehouses.map((wh) => (
@@ -832,65 +891,8 @@ export default function Reports() {
                 </FormControl>
               </Grid>
 
-              {/* Branch filter */}
-              <Grid item xs={12} sm={2.3}>
-                <FormControl fullWidth size="small">
-                  <InputLabel id="branch-filter-label">Branch</InputLabel>
-                  <Select
-                    labelId="branch-filter-label"
-                    id="branch-filter-select"
-                    value={branchFilter}
-                    label="Branch"
-                    onChange={(e) => setBranchFilter(e.target.value)}
-                  >
-                    <MenuItem value="">All Branches</MenuItem>
-                    {Array.from(new Set(warehouses.map(w => w.Name.split(' ')[0]))).sort().map(branch => (
-                      <MenuItem key={branch} value={branch}>{branch} Branch</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
               {/* Conditional filters based on Active Tab */}
-              {tabValue === 1 && (
-                <Grid item xs={12} sm={3}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel id="customer-filter-label">Customer</InputLabel>
-                    <Select
-                      labelId="customer-filter-label"
-                      id="customer-filter-select"
-                      value={customerFilter}
-                      label="Customer"
-                      onChange={(e) => setCustomerFilter(e.target.value)}
-                    >
-                      <MenuItem value="">All Customers</MenuItem>
-                      {uniqueCustomers.map(cust => (
-                        <MenuItem key={cust} value={cust}>{cust}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-              )}
 
-              {tabValue === 2 && (
-                <Grid item xs={12} sm={3}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel id="vendor-filter-label">Vendor</InputLabel>
-                    <Select
-                      labelId="vendor-filter-label"
-                      id="vendor-filter-select"
-                      value={vendorFilter}
-                      label="Vendor"
-                      onChange={(e) => setVendorFilter(e.target.value)}
-                    >
-                      <MenuItem value="">All Vendors</MenuItem>
-                      {uniqueVendors.map(vend => (
-                        <MenuItem key={vend} value={vend}>{vend}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-              )}
 
               {tabValue === 6 && (
                 <>
@@ -914,45 +916,7 @@ export default function Reports() {
                     </FormControl>
                   </Grid>
                   
-                  {asnReportView !== 'supplier' && (
-                    <Grid item xs={12} sm={3}>
-                      <FormControl fullWidth size="small">
-                        <InputLabel id="supplier-filter-label">Supplier</InputLabel>
-                        <Select
-                          labelId="supplier-filter-label"
-                          id="supplier-filter-select"
-                          value={vendorFilter}
-                          label="Supplier"
-                          onChange={(e) => setVendorFilter(e.target.value)}
-                        >
-                          <MenuItem value="">All Suppliers</MenuItem>
-                          {uniqueVendors.map(vend => (
-                            <MenuItem key={vend} value={vend}>{vend}</MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    </Grid>
-                  )}
 
-                  {['pending', 'variance'].includes(asnReportView) && (
-                    <Grid item xs={12} sm={3}>
-                      <FormControl fullWidth size="small">
-                        <InputLabel id="asn-item-filter-label">Item Selection</InputLabel>
-                        <Select
-                          labelId="asn-item-filter-label"
-                          id="asn-item-filter-select"
-                          value={itemFilter}
-                          label="Item Selection"
-                          onChange={(e) => setItemFilter(e.target.value)}
-                        >
-                          <MenuItem value="">All Items</MenuItem>
-                          {uniqueItems.map(item => (
-                            <MenuItem key={item} value={item}>{item}</MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    </Grid>
-                  )}
 
                   {['summary', 'status', 'date'].includes(asnReportView) && (
                     <Grid item xs={12} sm={3}>
@@ -961,9 +925,9 @@ export default function Reports() {
                         <Select
                           labelId="asn-status-filter-label"
                           id="asn-status-filter-select"
-                          value={statusFilter}
+                          value={statusInput}
                           label="ASN Status"
-                          onChange={(e) => setStatusFilter(e.target.value)}
+                          onChange={(e) => setStatusInput(e.target.value)}
                         >
                           <MenuItem value="">All Statuses</MenuItem>
                           <MenuItem value="Draft">Draft</MenuItem>
@@ -979,26 +943,6 @@ export default function Reports() {
                 </>
               )}
 
-              {(tabValue === 0 || tabValue === 1 || tabValue === 2) && (
-                <Grid item xs={12} sm={3}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel id="item-filter-label">Item Selection</InputLabel>
-                    <Select
-                      labelId="item-filter-label"
-                      id="item-filter-select"
-                      value={itemFilter}
-                      label="Item Selection"
-                      onChange={(e) => setItemFilter(e.target.value)}
-                    >
-                      <MenuItem value="">All Items</MenuItem>
-                      {uniqueItems.map(item => (
-                        <MenuItem key={item} value={item}>{item}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-              )}
-
               {(tabValue === 1 || tabValue === 2) && (
                 <Grid item xs={12} sm={3}>
                   <FormControl fullWidth size="small">
@@ -1006,9 +950,9 @@ export default function Reports() {
                     <Select
                       labelId="status-filter-label"
                       id="status-filter-select"
-                      value={statusFilter}
+                      value={statusInput}
                       label="Status"
-                      onChange={(e) => setStatusFilter(e.target.value)}
+                      onChange={(e) => setStatusInput(e.target.value)}
                     >
                       <MenuItem value="">All Statuses</MenuItem>
                       {tabValue === 1 ? (
@@ -1029,26 +973,15 @@ export default function Reports() {
                 </Grid>
               )}
 
-              {(tabValue === 1 || tabValue === 2) && (
-                <Grid item xs={12} sm={3}>
-                  <TextField
-                    label="Order Number"
-                    placeholder="Search order no..."
-                    size="small"
-                    fullWidth
-                    value={orderNoFilter}
-                    onChange={(e) => setOrderNoFilter(e.target.value)}
-                  />
-                </Grid>
-              )}
+
 
               {(tabValue === 1 || tabValue === 2) && (
                 <Grid item xs={12} sm={3}>
                   <FormControlLabel
                     control={
                       <Checkbox 
-                        checked={excludeCompleted} 
-                        onChange={(e) => setExcludeCompleted(e.target.checked)} 
+                        checked={excludeCompletedInput} 
+                        onChange={(e) => setExcludeCompletedInput(e.target.checked)} 
                         color="primary"
                       />
                     }
@@ -1065,8 +998,8 @@ export default function Reports() {
                       placeholder="Filter by zone..."
                       size="small"
                       fullWidth
-                      value={zoneFilter}
-                      onChange={(e) => setZoneFilter(e.target.value)}
+                      value={zoneInput}
+                      onChange={(e) => setZoneInput(e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={2.3}>
@@ -1075,18 +1008,8 @@ export default function Reports() {
                       placeholder="Filter by bin..."
                       size="small"
                       fullWidth
-                      value={binFilter}
-                      onChange={(e) => setBinFilter(e.target.value)}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={2.3}>
-                    <TextField
-                      label="Item Filter"
-                      placeholder="Filter by item..."
-                      size="small"
-                      fullWidth
-                      value={itemFilter}
-                      onChange={(e) => setItemFilter(e.target.value)}
+                      value={binInput}
+                      onChange={(e) => setBinInput(e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={2.3}>
@@ -1095,8 +1018,8 @@ export default function Reports() {
                       placeholder="Filter by category..."
                       size="small"
                       fullWidth
-                      value={itemGroupFilter}
-                      onChange={(e) => setItemGroupFilter(e.target.value)}
+                      value={itemGroupInput}
+                      onChange={(e) => setItemGroupInput(e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={2.3}>
@@ -1106,16 +1029,16 @@ export default function Reports() {
                       placeholder="Min kg/L..."
                       size="small"
                       fullWidth
-                      value={availableCapacityMin}
-                      onChange={(e) => setAvailableCapacityMin(e.target.value)}
+                      value={availableCapacityMinInput}
+                      onChange={(e) => setAvailableCapacityMinInput(e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={2.3}>
                     <FormControlLabel
                       control={
                         <Checkbox 
-                          checked={emptyBinsOnly} 
-                          onChange={(e) => setEmptyBinsOnly(e.target.checked)} 
+                          checked={emptyBinsOnlyInput} 
+                          onChange={(e) => setEmptyBinsOnlyInput(e.target.checked)} 
                         />
                       }
                       label="Empty Bins Only"
@@ -1123,6 +1046,16 @@ export default function Reports() {
                   </Grid>
                 </>
               )}
+
+              {/* Search & Clear Buttons */}
+              <Grid item xs={12} sx={{ display: 'flex', gap: 1.5, mt: 1 }}>
+                <Button variant="contained" onClick={handleSearch} sx={{ fontWeight: 600 }}>
+                  Search
+                </Button>
+                <Button variant="outlined" color="secondary" onClick={handleClear} sx={{ fontWeight: 600 }}>
+                  Clear
+                </Button>
+              </Grid>
             </Grid>
           </Card>
 
@@ -1136,7 +1069,7 @@ export default function Reports() {
                     Total Bins Checked
                   </Typography>
                   <Typography variant="h4" fontWeight={800} color="primary.main">
-                    {filteredData.length} Bins
+                    {totalRows} Bins
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Filtered locator count
@@ -1146,7 +1079,7 @@ export default function Reports() {
               <Grid item xs={12} sm={2.25}>
                 <Card sx={{ p: 2, bgcolor: '#f0fdf4', borderColor: '#bbf7d0', borderWidth: 1, borderStyle: 'solid', boxShadow: 'none' }}>
                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                    Empty Bins (Report)
+                    Empty Bins (This Page)
                   </Typography>
                   <Typography variant="h4" fontWeight={800} sx={{ color: 'green' }}>
                     {filteredData.filter((b: any) => b.BinStatus === 'Empty').length} Bins
@@ -1159,7 +1092,7 @@ export default function Reports() {
               <Grid item xs={12} sm={2.25}>
                 <Card sx={{ p: 2, bgcolor: '#fffbeb', borderColor: '#fef08a', borderWidth: 1, borderStyle: 'solid', boxShadow: 'none' }}>
                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                    Partially Occupied Bins
+                    Partially Occupied (This Page)
                   </Typography>
                   <Typography variant="h4" fontWeight={800} sx={{ color: '#b45309' }}>
                     {filteredData.filter((b: any) => b.BinStatus === 'Partially Occupied').length} Bins
@@ -1172,7 +1105,7 @@ export default function Reports() {
               <Grid item xs={12} sm={2.25}>
                 <Card sx={{ p: 2, bgcolor: '#fef2f2', borderColor: '#fca5a5', borderWidth: 1, borderStyle: 'solid', boxShadow: 'none' }}>
                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                    Full Bins
+                    Full Bins (This Page)
                   </Typography>
                   <Typography variant="h4" fontWeight={800} color="error.main">
                     {filteredData.filter((b: any) => b.BinStatus === 'Full').length} Bins
@@ -1185,7 +1118,7 @@ export default function Reports() {
               <Grid item xs={12} sm={2.25}>
                 <Card sx={{ p: 2, bgcolor: '#faf5ff', borderColor: '#e9d5ff', borderWidth: 1, borderStyle: 'solid', boxShadow: 'none' }}>
                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-                    Avg Weight Utilization
+                    Avg Weight Utilization (This Page)
                   </Typography>
                   <Typography variant="h4" fontWeight={800} color="secondary.main">
                     {(filteredData.reduce((acc: number, b: any) => acc + Number(b.WeightOccupancyPercent || 0), 0) / (filteredData.length || 1)).toFixed(1)}%
@@ -1344,8 +1277,7 @@ export default function Reports() {
                   <TableBody>
                     {(() => {
                       const baseData = tabValue === 6 ? finalReportData : filteredData;
-                      const paginatedData = baseData.slice(pagination.page * pagination.rowsPerPage, pagination.page * pagination.rowsPerPage + pagination.rowsPerPage);
-                      return paginatedData;
+                      return baseData;
                     })().map((row: any, idx: number) => (
                       <TableRow key={idx} hover>
                         {/* Tab 0: Stock Ledger */}
@@ -1661,7 +1593,7 @@ export default function Reports() {
             </TableContainer>
             {!loading && tabValue !== 4 && (
               <TablePaginationBar
-                count={tabValue === 6 ? finalReportData.length : filteredData.length}
+                count={totalRows}
                 page={pagination.page}
                 rowsPerPage={pagination.rowsPerPage}
                 onPageChange={pagination.setPage}
@@ -1681,19 +1613,44 @@ export default function Reports() {
               </Typography>
               
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                <FormControl fullWidth size="small">
-                  <InputLabel>Load Master Item Template</InputLabel>
-                  <Select
-                    value={selectedItemId}
-                    label="Load Master Item Template"
-                    onChange={(e) => handleItemSelect(e.target.value)}
-                  >
-                    <MenuItem value="">-- Custom Text Code (Free Text) --</MenuItem>
-                    {itemsList.map(itm => (
-                      <MenuItem key={itm.ItemId} value={itm.ItemId}>{itm.Name} ({itm.Code})</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <Autocomplete
+                  size="small"
+                  options={itemsList}
+                  getOptionLabel={(option) => option ? `${option.Name} (${option.Code})` : ''}
+                  value={selectedItemObject}
+                  loading={itemsLoading}
+                  onInputChange={(event, newInputValue) => {
+                    setItemsSearchQuery(newInputValue);
+                  }}
+                  onChange={(event, newValue) => {
+                    setSelectedItemObject(newValue);
+                    if (newValue) {
+                      setCustomText(newValue.Code);
+                      setCustomDesc(newValue.Name);
+                      setSelectedItemId(String(newValue.ItemId));
+                    } else {
+                      setCustomText('');
+                      setCustomDesc('');
+                      setSelectedItemId('');
+                    }
+                  }}
+                  renderInput={(params) => (
+                    <TextField 
+                      {...params} 
+                      label="Load Master Item Template" 
+                      placeholder="Type name or code to search..." 
+                      InputProps={{
+                        ...params.InputProps,
+                        endAdornment: (
+                          <>
+                            {itemsLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                            {params.InputProps.endAdornment}
+                          </>
+                        ),
+                      }}
+                    />
+                  )}
+                />
 
                 <TextField
                   label="Barcode String / Value"

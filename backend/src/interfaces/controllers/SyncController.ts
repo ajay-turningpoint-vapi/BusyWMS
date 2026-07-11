@@ -262,21 +262,25 @@ export class SyncController {
     try {
       const pool = mssqlDb.getPool();
       const query = `
-        SELECT 
-          CODE, name, alias, HSNCODE,
-          (SELECT NAME FROM MASTER1 M WHERE M.CODE=MASTER1.ParentGrp) AS ITEM_GRP,
-          d4 as purch_price,
-          d17 as purch_dis,
-          d3 as alt_sale_price,
-          d22 as alt_purch_price,
-          D2 AS MRP,
-          D16 AS SALE_DIS,
-          (SELECT NAME FROM MASTER1 m  WHERE m.CODE=MASTER1.CM1) AS MAINUNIT,
-          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM2) AS ALTUNIT,
-          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM9) AS vndor,
-          (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM8) AS tax
-        FROM master1 
-        WHERE mastertype=6
+        WITH Items AS (
+          SELECT 
+            CODE, name, alias, HSNCODE,
+            (SELECT NAME FROM MASTER1 M WHERE M.CODE=MASTER1.ParentGrp) AS ITEM_GRP,
+            d4 as purch_price,
+            d17 as purch_dis,
+            d3 as alt_sale_price,
+            d22 as alt_purch_price,
+            D2 AS MRP,
+            D16 AS SALE_DIS,
+            (SELECT NAME FROM MASTER1 m  WHERE m.CODE=MASTER1.CM1) AS MAINUNIT,
+            (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM2) AS ALTUNIT,
+            (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM9) AS vndor,
+            (SELECT NAME FROM MASTER1  m WHERE m.CODE=MASTER1.CM8) AS tax
+          FROM master1 
+          WHERE mastertype=6
+        )
+        SELECT * FROM Items
+        WHERE MAINUNIT IS NULL OR (MAINUNIT != 'N/A' AND MAINUNIT != 'N.A.')
         ORDER BY alias
       `;
 
@@ -293,7 +297,7 @@ export class SyncController {
       // Filter out deleted items
       const beforeCount = erpItems.length;
       erpItems = erpItems.filter((row: any) => {
-        const code = row.CODE ? String(row.CODE).trim() : '';
+        const code = row.alias ? String(row.alias).trim() : (row.CODE ? String(row.CODE).trim() : '');
         return !deletedCodes.has(code);
       });
       console.log(`Filtered out ${beforeCount - erpItems.length} deleted items. ${erpItems.length} items remain for sync.`);
@@ -305,7 +309,7 @@ export class SyncController {
       for (let i = 0; i < erpItems.length; i += chunkSize) {
         const chunk = erpItems.slice(i, i + chunkSize);
         const values = chunk.map(row => {
-          const code = row.CODE ? String(row.CODE).trim() : (row.alias ? String(row.alias).trim() : (row.name ? String(row.name).trim() : ''));
+          const code = row.alias ? String(row.alias).trim() : (row.CODE ? String(row.CODE).trim() : (row.name ? String(row.name).trim() : ''));
           const alias = row.alias ? String(row.alias).trim() : null;
           const name = row.name ? String(row.name).trim() : code;
           const uom = row.MAINUNIT ? String(row.MAINUNIT).trim() : 'PCS';
@@ -1096,6 +1100,13 @@ export class SyncController {
           AND TRAN3.VCHTYPE = 13 
           AND TRAN3.refcode IN (SELECT refcode FROM TRAN3 t32 WHERE t32.rectype = 4 GROUP BY t32.refcode) 
           AND (
+              (SELECT NAME FROM MASTER1 U WHERE U.CODE = M.CM1) IS NULL
+              OR (
+                  (SELECT NAME FROM MASTER1 U WHERE U.CODE = M.CM1) != 'N.A.'
+                  AND (SELECT NAME FROM MASTER1 U WHERE U.CODE = M.CM1) != 'N/A'
+              )
+          )
+          AND (
               SELECT ABS(SUM(VALUE1))
               FROM TRAN3 T31
               WHERE T31.REFCODE = TRAN3.REFCODE
@@ -1263,6 +1274,7 @@ export class SyncController {
           AND T.TRANTYPE IN (0)
           AND T.RECTYPE = 4
           AND T.DATE BETWEEN @startdate AND @enddate
+          AND (U.NAME IS NULL OR (U.NAME != 'N.A.' AND U.NAME != 'N/A'))
     `;
 
     const start = new Date(startDateParam);

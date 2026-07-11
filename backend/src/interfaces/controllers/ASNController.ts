@@ -533,9 +533,57 @@ export class ASNController {
 
   // 9. ASN Reports Details
   public static async getReportsData(req: AuthenticatedRequest, res: Response) {
-    const { startDate, endDate, supplierId, warehouseId, status } = req.query;
+    const { startDate, endDate, supplierId, warehouseId, status, search, warehouseCode } = req.query;
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
     try {
-      let sql = `
+      let baseQuery = `
+        FROM tblASN asn
+        INNER JOIN tblSupplier s ON asn.SupplierId = s.SupplierId
+        INNER JOIN tblWarehouse w ON asn.WarehouseId = w.WarehouseId
+        LEFT JOIN tblPurchaseOrder po ON asn.POId = po.POId
+        INNER JOIN tblASNItem asni ON asn.ASNId = asni.ASNId
+        INNER JOIN tblItem item ON asni.ItemId = item.ItemId
+        WHERE 1=1
+      `;
+      const params: Record<string, any> = {};
+
+      if (startDate) {
+        baseQuery += ` AND asn.ExpectedArrivalDate >= @startDate`;
+        params.startDate = `${startDate} 00:00:00`;
+      }
+      if (endDate) {
+        baseQuery += ` AND asn.ExpectedArrivalDate <= @endDate`;
+        params.endDate = `${endDate} 23:59:59`;
+      }
+      if (supplierId) {
+        baseQuery += ` AND asn.SupplierId = @supplierId`;
+        params.supplierId = parseInt(supplierId as string, 10);
+      }
+      if (warehouseId) {
+        baseQuery += ` AND asn.WarehouseId = @warehouseId`;
+        params.warehouseId = parseInt(warehouseId as string, 10);
+      }
+      if (warehouseCode) {
+        baseQuery += ` AND w.Code = @warehouseCode`;
+        params.warehouseCode = warehouseCode;
+      }
+      if (status) {
+        baseQuery += ` AND asn.Status = @status`;
+        params.status = status;
+      }
+      if (search) {
+        baseQuery += ` AND (asn.ASNNumber LIKE @search OR s.Name LIKE @search OR item.Code LIKE @search OR item.Name LIKE @search OR po.POCode LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
         SELECT 
           asn.ASNId,
           asn.ASNNumber,
@@ -562,41 +610,15 @@ export class ASNController {
           asni.BatchNumber,
           asni.SerialNumber,
           asni.ExpiryDate
-        FROM tblASN asn
-        INNER JOIN tblSupplier s ON asn.SupplierId = s.SupplierId
-        INNER JOIN tblWarehouse w ON asn.WarehouseId = w.WarehouseId
-        LEFT JOIN tblPurchaseOrder po ON asn.POId = po.POId
-        INNER JOIN tblASNItem asni ON asn.ASNId = asni.ASNId
-        INNER JOIN tblItem item ON asni.ItemId = item.ItemId
-        WHERE 1=1
+        ${baseQuery}
+        ORDER BY asn.ExpectedArrivalDate DESC, asn.ASNId DESC
+        LIMIT @limit OFFSET @offset
       `;
-      const params: Record<string, any> = {};
+      params.limit = limit;
+      params.offset = offset;
 
-      if (startDate) {
-        sql += ` AND asn.ExpectedArrivalDate >= @startDate`;
-        params.startDate = `${startDate} 00:00:00`;
-      }
-      if (endDate) {
-        sql += ` AND asn.ExpectedArrivalDate <= @endDate`;
-        params.endDate = `${endDate} 23:59:59`;
-      }
-      if (supplierId) {
-        sql += ` AND asn.SupplierId = @supplierId`;
-        params.supplierId = parseInt(supplierId as string, 10);
-      }
-      if (warehouseId) {
-        sql += ` AND asn.WarehouseId = @warehouseId`;
-        params.warehouseId = parseInt(warehouseId as string, 10);
-      }
-      if (status) {
-        sql += ` AND asn.Status = @status`;
-        params.status = status;
-      }
-
-      sql += ` ORDER BY asn.ExpectedArrivalDate DESC, asn.ASNId DESC`;
-
-      const rows = await db.query(sql, params);
-      return res.json(rows);
+      const rows = await db.query(dataQuery, params);
+      return res.json({ items: rows, total });
     } catch (err: any) {
       console.error('Error generating ASN reports data:', err);
       return res.status(500).json({ message: err.message });

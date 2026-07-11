@@ -51,7 +51,7 @@ export class MasterController {
   public static async getZones(req: AuthenticatedRequest, res: Response) {
     try {
       const rows = await db.query(`
-        SELECT z.*, w.Name AS WarehouseName 
+        SELECT z.*, w.Code AS WarehouseCode, w.Name AS WarehouseName 
         FROM tblZone z
         INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
         ORDER BY z.ZoneId DESC
@@ -188,6 +188,7 @@ export class MasterController {
       const limit = parseInt(req.query.limit as string || '50', 10);
       const search = (req.query.search as string || '').trim();
       const inBinsOnly = req.query.inBinsOnly === 'true';
+      const lightweight = req.query.lightweight === 'true';
 
       let whereClause = 'WHERE 1=1';
       const params: Record<string, any> = {};
@@ -202,6 +203,10 @@ export class MasterController {
         fromClause += ' INNER JOIN tblInventory inv ON i.ItemId = inv.ItemId';
         whereClause += ' AND inv.Quantity > 0';
       }
+
+      const selectFields = lightweight 
+        ? 'i.ItemId, i.Code, i.Name, i.UOM, i.Barcode'
+        : 'i.*';
 
       // Check if paginated or full list requested
       const isPaginated = req.query.page !== undefined;
@@ -218,7 +223,7 @@ export class MasterController {
 
         // Query paginated items
         const selectQuery = `
-          SELECT DISTINCT i.* 
+          SELECT DISTINCT ${selectFields} 
           FROM ${fromClause} 
           ${whereClause} 
           ORDER BY i.ItemId DESC 
@@ -230,7 +235,7 @@ export class MasterController {
       } else {
         // Query full list
         const selectQuery = `
-          SELECT DISTINCT i.* 
+          SELECT DISTINCT ${selectFields} 
           FROM ${fromClause} 
           ${whereClause} 
           ORDER BY i.ItemId DESC
@@ -277,11 +282,10 @@ export class MasterController {
   public static async getRacks(req: AuthenticatedRequest, res: Response) {
     try {
       const rows = await db.query(`
-        SELECT r.*, z.Code AS ZoneCode, w.Code AS WarehouseCode, z.Name AS ZoneName, w.Name AS WarehouseName, a.Code AS AisleCode, a.Name AS AisleName
+        SELECT r.*, z.Code AS ZoneCode, w.Code AS WarehouseCode, z.Name AS ZoneName, w.Name AS WarehouseName
         FROM tblRack r
         INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
         INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
-        LEFT JOIN tblAisle a ON r.AisleId = a.AisleId
         ORDER BY r.RackId DESC
       `);
       return res.json(rows);
@@ -291,7 +295,7 @@ export class MasterController {
   }
 
   public static async createRack(req: AuthenticatedRequest, res: Response) {
-    const { zoneId, aisleId, name } = req.body;
+    const { zoneId, name } = req.body;
     if (!zoneId || !name) return res.status(400).json({ message: 'Zone and Name are required' });
     try {
       // Auto-generate sequential rack code (RK001, RK002, ...)
@@ -309,9 +313,9 @@ export class MasterController {
       const code = `RK${String(nextNum).padStart(3, '0')}`;
 
       await db.executeCmd(`
-        INSERT INTO tblRack (ZoneId, AisleId, Code, Name, IsActive)
-        VALUES (@zoneId, @aisleId, @code, @name, 1)
-      `, { zoneId, aisleId: aisleId || null, code, name });
+        INSERT INTO tblRack (ZoneId, Code, Name, IsActive)
+        VALUES (@zoneId, @code, @name, 1)
+      `, { zoneId, code, name });
       return res.status(201).json({ message: 'Rack created', code });
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
@@ -521,15 +525,15 @@ export class MasterController {
   // ==========================================
   public static async updateRack(req: AuthenticatedRequest, res: Response) {
     const { id } = req.params;
-    const { zoneId, aisleId, code, name, isActive } = req.body;
+    const { zoneId, code, name, isActive } = req.body;
     if (!zoneId || !code || !name) return res.status(400).json({ message: 'Missing fields' });
     try {
       const activeVal = isActive === false ? 0 : 1;
       const result = await db.executeCmd(`
         UPDATE tblRack 
-        SET ZoneId = @zoneId, AisleId = @aisleId, Code = @code, Name = @name, IsActive = @activeVal 
+        SET ZoneId = @zoneId, Code = @code, Name = @name, IsActive = @activeVal 
         WHERE RackId = @id
-      `, { zoneId, aisleId: aisleId || null, code, name, activeVal, id });
+      `, { zoneId, code, name, activeVal, id });
       
       if (result.rowsAffected === 0) {
         return res.status(404).json({ message: 'Rack not found' });
@@ -938,72 +942,6 @@ export class MasterController {
   }
 
   // ==========================================
-  // AISLE CRUD
-  // ==========================================
-  public static async getAisles(req: AuthenticatedRequest, res: Response) {
-    try {
-      const rows = await db.query(`
-        SELECT a.*, z.Code AS ZoneCode, w.Code AS WarehouseCode, z.Name AS ZoneName, w.Name AS WarehouseName
-        FROM tblAisle a
-        INNER JOIN tblZone z ON a.ZoneId = z.ZoneId
-        INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
-        ORDER BY a.AisleId DESC
-      `);
-      return res.json(rows);
-    } catch (err: any) {
-      return res.status(500).json({ message: err.message });
-    }
-  }
-
-  public static async createAisle(req: AuthenticatedRequest, res: Response) {
-    const { zoneId, code, name } = req.body;
-    if (!zoneId || !code || !name) return res.status(400).json({ message: 'Missing fields' });
-    try {
-      await db.executeCmd(`
-        INSERT INTO tblAisle (ZoneId, Code, Name, IsActive)
-        VALUES (@zoneId, @code, @name, 1)
-      `, { zoneId, code, name });
-      return res.status(201).json({ message: 'Aisle created successfully' });
-    } catch (err: any) {
-      return res.status(500).json({ message: err.message });
-    }
-  }
-
-  public static async updateAisle(req: AuthenticatedRequest, res: Response) {
-    const { id } = req.params;
-    const { zoneId, code, name, isActive } = req.body;
-    if (!zoneId || !code || !name) return res.status(400).json({ message: 'Missing fields' });
-    try {
-      const act = isActive === false ? 0 : 1;
-      const result = await db.executeCmd(`
-        UPDATE tblAisle SET ZoneId = @zoneId, Code = @code, Name = @name, IsActive = @act
-        WHERE AisleId = @id
-      `, { zoneId, code, name, act, id });
-      if (result.rowsAffected === 0) {
-        return res.status(404).json({ message: 'Aisle not found' });
-      }
-      return res.json({ message: 'Aisle updated successfully' });
-    } catch (err: any) {
-      return res.status(500).json({ message: err.message });
-    }
-  }
-
-  public static async deleteAisle(req: AuthenticatedRequest, res: Response) {
-    const { id } = req.params;
-    try {
-      const racks = await db.query('SELECT COUNT(*) AS count FROM tblRack WHERE AisleId = @id', { id });
-      if (racks[0].count > 0) {
-        return res.status(400).json({ message: 'Cannot delete Aisle because it is associated with racks.' });
-      }
-      const result = await db.executeCmd('DELETE FROM tblAisle WHERE AisleId = @id', { id });
-      if (result.rowsAffected === 0) {
-        return res.status(404).json({ message: 'Aisle not found' });
-      }
-      return res.json({ message: 'Aisle deleted successfully' });
-    } catch (err: any) {
-      return res.status(500).json({ message: err.message });
-    }
-  }
 
   // CUSTOMER CRUD
   public static async createCustomer(req: AuthenticatedRequest, res: Response) {

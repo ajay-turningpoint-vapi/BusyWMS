@@ -21,10 +21,11 @@ export default function Masters() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   
   // Modal states
   const [openModal, setOpenModal] = useState(false);
-  const [modalType, setModalType] = useState<'warehouse' | 'zone' | 'aisle' | 'rack' | 'shelf' | 'bin' | 'item' | 'user' | 'customer' | 'supplier'>('warehouse');
+  const [modalType, setModalType] = useState<'warehouse' | 'zone' | 'rack' | 'shelf' | 'bin' | 'item' | 'user' | 'customer' | 'supplier'>('warehouse');
   const [formData, setFormData] = useState<any>({});
   const [isEditMode, setIsEditMode] = useState(false);
   const [editRecordId, setEditRecordId] = useState<number | string | null>(null);
@@ -38,6 +39,17 @@ export default function Masters() {
   // Search & Pagination State
   const pagination = usePagination(25);
 
+  const handleSearch = () => {
+    setSearchQuery(searchInput);
+    pagination.resetPage();
+  };
+
+  const handleClear = () => {
+    setSearchInput('');
+    setSearchQuery('');
+    pagination.resetPage();
+  };
+
   // Confirm delete dialog state
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number | string; type: typeof modalType } | null>(null);
@@ -45,7 +57,6 @@ export default function Masters() {
   // Helpers for lookups
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [zones, setZones] = useState<any[]>([]);
-  const [aisles, setAisles] = useState<any[]>([]);
   const [racks, setRacks] = useState<any[]>([]);
   const [shelves, setShelves] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
@@ -168,7 +179,6 @@ export default function Masters() {
     if (index === 4) endpoint = '/masters/bins';
     if (index === 5) endpoint = '/masters/items?inBinsOnly=true';
     if (index === 8) endpoint = '/masters/users';
-    if (index === 9) endpoint = '/masters/aisles';
 
     api.get(endpoint)
       .then((res) => {
@@ -182,15 +192,17 @@ export default function Masters() {
   };
 
   useEffect(() => {
+    setSearchInput('');
+    setSearchQuery('');
     if (tabValue === 5) {
       pagination.resetPage();
-      fetchItems(0, pagination.rowsPerPage, searchQuery);
+      fetchItems(0, pagination.rowsPerPage, '');
     } else if (tabValue === 6) {
       pagination.resetPage();
-      fetchCustomers(0, pagination.rowsPerPage, searchQuery);
+      fetchCustomers(0, pagination.rowsPerPage, '');
     } else if (tabValue === 7) {
       pagination.resetPage();
-      fetchSuppliers(0, pagination.rowsPerPage, searchQuery);
+      fetchSuppliers(0, pagination.rowsPerPage, '');
     } else {
       fetchTab(tabValue);
       pagination.resetPage();
@@ -214,8 +226,6 @@ export default function Masters() {
       setWarehouses(whRes.data);
       const znRes = await api.get('/masters/zones');
       setZones(znRes.data);
-      const alRes = await api.get('/masters/aisles');
-      setAisles(alRes.data);
       const rkRes = await api.get('/masters/racks');
       setRacks(rkRes.data);
       const shRes = await api.get('/masters/shelves');
@@ -244,18 +254,9 @@ export default function Masters() {
         isActive: row.IsActive === 1 || row.IsActive === true
       };
     }
-    if (type === 'aisle') {
-      return {
-        zoneId: row.ZoneId || '',
-        code: row.Code || '',
-        name: row.Name || '',
-        isActive: row.IsActive === 1 || row.IsActive === true
-      };
-    }
     if (type === 'rack') {
       return {
         zoneId: row.ZoneId || '',
-        aisleId: row.AisleId || '',
         code: row.Code || '',
         name: row.Name || '',
         isActive: row.IsActive === 1 || row.IsActive === true
@@ -351,7 +352,6 @@ export default function Masters() {
     if (tabValue === 6) setModalType('customer');
     if (tabValue === 7) setModalType('supplier');
     if (tabValue === 8) setModalType('user');
-    if (tabValue === 9) setModalType('aisle');
     setFormData({});
     setOpenModal(true);
   };
@@ -363,7 +363,6 @@ export default function Masters() {
     const id = 
       type === 'warehouse' ? row.WarehouseId :
       type === 'zone' ? row.ZoneId :
-      type === 'aisle' ? row.AisleId :
       type === 'rack' ? row.RackId :
       type === 'shelf' ? row.ShelfId :
       type === 'bin' ? row.BinId :
@@ -387,7 +386,6 @@ export default function Masters() {
     const { id, type } = deleteTarget;
     let endpoint = `/masters/warehouses/${id}`;
     if (type === 'zone') endpoint = `/masters/zones/${id}`;
-    if (type === 'aisle') endpoint = `/masters/aisles/${id}`;
     if (type === 'rack') endpoint = `/masters/racks/${id}`;
     if (type === 'shelf') endpoint = `/masters/shelves/${id}`;
     if (type === 'bin') endpoint = `/masters/bins/${id}`;
@@ -445,7 +443,6 @@ export default function Masters() {
     e.preventDefault();
     let endpoint = '/masters/warehouses';
     if (modalType === 'zone') endpoint = '/masters/zones';
-    if (modalType === 'aisle') endpoint = '/masters/aisles';
     if (modalType === 'rack') endpoint = '/masters/racks';
     if (modalType === 'shelf') endpoint = '/masters/shelves';
     if (modalType === 'bin') endpoint = '/masters/bins';
@@ -511,14 +508,11 @@ export default function Masters() {
 
   const filteredData = useMemo(() => {
     if (tabValue === 5 || tabValue === 6 || tabValue === 7) return []; // Managed server-side
+    if (!searchQuery) return data;
+    const query = searchQuery.toLowerCase();
     return data.filter((row: any) => {
-      const query = searchQuery.toLowerCase();
-      return (
-        (row.Code && row.Code.toLowerCase().includes(query)) ||
-        (row.Name && row.Name.toLowerCase().includes(query)) ||
-        (row.Barcode && row.Barcode.toLowerCase().includes(query)) ||
-        (row.Username && row.Username.toLowerCase().includes(query)) ||
-        (row.FullName && row.FullName.toLowerCase().includes(query))
+      return Object.values(row).some((val) => 
+        val !== null && val !== undefined && String(val).toLowerCase().includes(query)
       );
     });
   }, [data, searchQuery, tabValue]);
@@ -592,8 +586,6 @@ export default function Masters() {
       ];
     } else if (tabValue === 8) {
       headers = [{ key: 'UserId', header: 'User ID' }, { key: 'Username', header: 'Username' }, { key: 'FullName', header: 'Full Name' }, { key: 'Email', header: 'Email' }, { key: 'RoleName', header: 'Role' }];
-    } else if (tabValue === 9) {
-      headers = [{ key: 'AisleId', header: 'Aisle ID' }, { key: 'WarehouseName', header: 'Warehouse' }, { key: 'Code', header: 'Code' }, { key: 'Name', header: 'Name' }];
     }
     const exportData = 
       tabValue === 5 ? itemsPageData : 
@@ -676,12 +668,33 @@ export default function Masters() {
         <Tab icon={<User size={16} />} iconPosition="start" label="Customers" />
         <Tab icon={<User size={16} />} iconPosition="start" label="Suppliers" />
         <Tab icon={<User size={16} />} iconPosition="start" label="Users & RBAC" />
-        <Tab icon={<Layers size={16} />} iconPosition="start" label="Aisles" />
       </Tabs>
 
       {/* Search Filter */}
       <Box sx={{ display: 'flex', gap: 1.5, mb: 3, alignItems: 'center' }}>
-        <SearchBar value={searchQuery} onChange={(v) => { setSearchQuery(v); pagination.resetPage(); }} placeholder="Search masters..." />
+        <TextField
+          size="small"
+          placeholder="Search masters..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+          sx={{ minWidth: 220 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search size={16} color="#888" />
+              </InputAdornment>
+            ),
+          }}
+        />
+        <Button variant="contained" onClick={handleSearch} sx={{ fontWeight: 600 }}>
+          Search
+        </Button>
+        {(searchInput || searchQuery) && (
+          <Button variant="outlined" color="secondary" onClick={handleClear} sx={{ fontWeight: 600 }}>
+            Clear
+          </Button>
+        )}
         <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
           {tabValue === 5 ? `${itemsPageData.length} of ${itemsTotalCount}` : 
            tabValue === 6 ? `${customersPageData.length} of ${customersTotalCount}` :
@@ -745,7 +758,7 @@ export default function Masters() {
                   )}
                    {tabValue === 5 && (
                      <>
-                       <TableCell sx={{ fontWeight: 600 }}>Item ID</TableCell>
+                       <TableCell sx={{ fontWeight: 600 }}>ID</TableCell>
                        <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
                        <TableCell sx={{ fontWeight: 600 }}>Item Code</TableCell>
                        <TableCell sx={{ fontWeight: 600 }}>HSN Code</TableCell>
@@ -760,7 +773,7 @@ export default function Masters() {
                    )}
                   {tabValue === 6 && (
                     <>
-                      <TableCell sx={{ fontWeight: 600 }}>Customer ID</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>ID</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Customer Code</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Mobile</TableCell>
@@ -773,7 +786,7 @@ export default function Masters() {
                   )}
                   {tabValue === 7 && (
                     <>
-                      <TableCell sx={{ fontWeight: 600 }}>Supplier ID</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>ID</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Name</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Supplier Code</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Mobile</TableCell>
@@ -791,15 +804,6 @@ export default function Masters() {
                       <TableCell sx={{ fontWeight: 600 }}>Full Name</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Email</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Assigned Role</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
-                    </>
-                  )}
-                  {tabValue === 9 && (
-                    <>
-                      <TableCell sx={{ fontWeight: 600 }}>Aisle ID</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Warehouse / Zone</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Aisle Code</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Aisle Name</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
                     </>
                   )}
@@ -966,8 +970,7 @@ export default function Masters() {
                         tabValue === 1 ? row.ZoneId :
                         tabValue === 2 ? row.RackId :
                         tabValue === 3 ? row.ShelfId :
-                        tabValue === 4 ? row.BinId :
-                        tabValue === 8 ? row.UserId : row.AisleId
+                        tabValue === 4 ? row.BinId : row.UserId
                       } hover>
                         {tabValue === 0 && (
                           <>
@@ -1025,15 +1028,6 @@ export default function Masters() {
                             <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
                           </>
                         )}
-                        {tabValue === 9 && (
-                          <>
-                            <TableCell>{row.AisleId}</TableCell>
-                            <TableCell>{row.WarehouseName} / {row.ZoneName}</TableCell>
-                            <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
-                            <TableCell>{row.Name}</TableCell>
-                            <TableCell>{row.IsActive ? <Typography color="success.main" variant="caption" sx={{ fontWeight: 700 }}>Active</Typography> : 'Inactive'}</TableCell>
-                          </>
-                        )}
                         <TableCell>
                           <Box sx={{ display: 'flex', gap: 1 }}>
                             {tabValue === 4 && (
@@ -1056,8 +1050,7 @@ export default function Masters() {
                                   tabValue === 1 ? 'zone' :
                                   tabValue === 2 ? 'rack' :
                                   tabValue === 3 ? 'shelf' :
-                                  tabValue === 4 ? 'bin' :
-                                  tabValue === 8 ? 'user' : 'aisle'
+                                  tabValue === 4 ? 'bin' : 'user'
                                 )}
                               >
                                 Edit
@@ -1073,14 +1066,12 @@ export default function Masters() {
                                   tabValue === 1 ? row.ZoneId :
                                   tabValue === 2 ? row.RackId :
                                   tabValue === 3 ? row.ShelfId :
-                                  tabValue === 4 ? row.BinId :
-                                  tabValue === 8 ? row.UserId : row.AisleId,
+                                  tabValue === 4 ? row.BinId : row.UserId,
                                   tabValue === 0 ? 'warehouse' :
                                   tabValue === 1 ? 'zone' :
                                   tabValue === 2 ? 'rack' :
                                   tabValue === 3 ? 'shelf' :
-                                  tabValue === 4 ? 'bin' :
-                                  tabValue === 8 ? 'user' : 'aisle'
+                                  tabValue === 4 ? 'bin' : 'user'
                                 )}
                               >
                                 Delete
@@ -1207,33 +1198,11 @@ export default function Masters() {
                   {zones.map(z => <MenuItem key={z.ZoneId} value={z.ZoneId}>{z.Name} ({z.WarehouseCode})</MenuItem>)}
                 </Select>
               </FormControl>
-              <FormControl fullWidth size="small">
-                <InputLabel>Aisle (Optional)</InputLabel>
-                <Select name="aisleId" value={formData.aisleId || ''} label="Aisle (Optional)" onChange={handleInputChange}>
-                  <MenuItem value=""><em>None</em></MenuItem>
-                  {aisles.filter(a => Number(a.ZoneId) === Number(formData.zoneId)).map(a => (
-                    <MenuItem key={a.AisleId} value={a.AisleId}>{a.Name} ({a.Code})</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
               {isEditMode && (
                 <TextField label="Rack Code" name="code" value={formData.code || ''} fullWidth size="small" disabled
                   helperText="Auto-generated, cannot be changed" />
               )}
               <TextField label="Rack Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} />
-            </>
-          )}
-
-          {modalType === 'aisle' && (
-            <>
-              <FormControl fullWidth size="small">
-                <InputLabel>Zone</InputLabel>
-                <Select name="zoneId" value={formData.zoneId || ''} required label="Zone" onChange={handleInputChange}>
-                  {zones.map(z => <MenuItem key={z.ZoneId} value={z.ZoneId}>{z.Name} ({z.WarehouseCode})</MenuItem>)}
-                </Select>
-              </FormControl>
-              <TextField label="Aisle Code" name="code" value={formData.code || ''} required fullWidth size="small" onChange={handleInputChange} />
-              <TextField label="Aisle Name" name="name" value={formData.name || ''} required fullWidth size="small" onChange={handleInputChange} />
             </>
           )}
 

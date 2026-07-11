@@ -92,11 +92,6 @@ app.post('/api/masters/zones', authenticateJWT, requirePermission('Masters', 'cr
 app.put('/api/masters/zones/:id', authenticateJWT, requirePermission('Masters', 'update'), MasterController.updateZone);
 app.delete('/api/masters/zones/:id', authenticateJWT, requirePermission('Masters', 'delete'), MasterController.deleteZone);
 
-app.get('/api/masters/aisles', authenticateJWT, requirePermission('Masters', 'read'), MasterController.getAisles);
-app.post('/api/masters/aisles', authenticateJWT, requirePermission('Masters', 'create'), MasterController.createAisle);
-app.put('/api/masters/aisles/:id', authenticateJWT, requirePermission('Masters', 'update'), MasterController.updateAisle);
-app.delete('/api/masters/aisles/:id', authenticateJWT, requirePermission('Masters', 'delete'), MasterController.deleteAisle);
-
 app.get('/api/masters/racks', authenticateJWT, requirePermission('Masters', 'read'), MasterController.getRacks);
 app.post('/api/masters/racks', authenticateJWT, requirePermission('Masters', 'create'), MasterController.createRack);
 app.put('/api/masters/racks/:id', authenticateJWT, requirePermission('Masters', 'update'), MasterController.updateRack);
