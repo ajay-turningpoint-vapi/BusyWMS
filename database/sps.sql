@@ -40,7 +40,13 @@ BEGIN
         -- Consolidation hint: prefer bins already holding this item
         CASE WHEN EXISTS (
             SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.ItemId = @ItemId
-        ) THEN 1 ELSE 0 END AS HasExistingStock
+        ) THEN 1 ELSE 0 END AS HasExistingStock,
+        FLOOR(
+            CASE WHEN (b.CapacityWeight - b.OccupiedWeight) / @ItemWeight < (b.CapacityVolume - b.OccupiedVolume) / @ItemVolume 
+                 THEN (b.CapacityWeight - b.OccupiedWeight) / @ItemWeight 
+                 ELSE (b.CapacityVolume - b.OccupiedVolume) / @ItemVolume 
+            END
+        ) AS MaxQtyItCanTake
     FROM tblBin b
     INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
     INNER JOIN tblRack r  ON s.RackId = r.RackId
@@ -48,8 +54,15 @@ BEGIN
     INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
     WHERE w.WarehouseId = @PreferredWarehouseId
       AND b.IsActive = 1
-      AND (b.CapacityWeight - b.OccupiedWeight) >= @ReqWeight
-      AND (b.CapacityVolume - b.OccupiedVolume) >= @ReqVolume
+      AND (b.CapacityWeight - b.OccupiedWeight) >= @ItemWeight
+      AND (b.CapacityVolume - b.OccupiedVolume) >= @ItemVolume
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM tblInventory i2 
+          WHERE i2.BinId = b.BinId 
+            AND i2.ItemId != @ItemId 
+            AND i2.Quantity > 0
+      )
     ORDER BY HasExistingStock DESC,   -- Prefer bins with existing stock for consolidation
              (b.CapacityWeight - b.OccupiedWeight) ASC;  -- Then tightest-fit bin
 END;

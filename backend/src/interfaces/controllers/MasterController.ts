@@ -1050,4 +1050,39 @@ export class MasterController {
       return res.status(500).json({ message: err.message });
     }
   }
+
+  public static async getBinDetails(req: AuthenticatedRequest, res: Response) {
+    const { id } = req.params;
+    try {
+      // 1. Fetch bin info with its parent location codes
+      const binRows = await db.query(`
+        SELECT b.*, s.Code AS ShelfCode, r.Code AS RackCode, z.Code AS ZoneCode, w.Code AS WarehouseCode
+        FROM tblBin b
+        INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
+        INNER JOIN tblRack r ON s.RackId = r.RackId
+        INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
+        INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
+        WHERE b.BinId = @id
+      `, { id });
+
+      if (binRows.length === 0) {
+        return res.status(404).json({ message: 'Bin not found' });
+      }
+
+      const bin = binRows[0];
+
+      // 2. Fetch inventory contents in this bin
+      const items = await db.query(`
+        SELECT inv.InventoryId, inv.Quantity, inv.ReservedQty, item.Code AS ItemCode, item.Name AS ItemName, batch.BatchNumber
+        FROM tblInventory inv
+        INNER JOIN tblItem item ON inv.ItemId = item.ItemId
+        LEFT JOIN tblBatch batch ON inv.BatchId = batch.BatchId
+        WHERE inv.BinId = @id AND inv.Quantity > 0
+      `, { id });
+
+      return res.json({ bin, items });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
 }

@@ -34,6 +34,7 @@ export default function Putaway() {
   const [selectedBin, setSelectedBin] = useState<any>(null);
   const [allBins, setAllBins] = useState<any[]>([]);
   const [scannedBarcode, setScannedBarcode] = useState('');
+  const [putawayQuantity, setPutawayQuantity] = useState<number | string>('');
 
   const loadData = async () => {
     setLoading(true);
@@ -53,31 +54,58 @@ export default function Putaway() {
     loadData();
   }, []);
 
-  const openPutawayDialog = async (item: any) => {
-    setActiveItem(item);
-    setSelectedBin(null);
-    setManualBinCode('');
-    setScannedBarcode('');
-    setSuggestions([]);
+  const fetchSuggestions = async (itemId: number, qty: number) => {
     setSugLoading(true);
-    
     try {
-      // Get suggested bins from backend algorithm (stored procedure)
       const res = await api.post('/putaway/suggest', {
-        itemId: item.ItemId,
-        quantity: item.PendingPutawayQty,
+        itemId,
+        quantity: qty,
         warehouseId: user?.warehouseId
       });
       setSuggestions(res.data);
       if (res.data.length > 0) {
         setSelectedBin(res.data[0]); // Default to first suggestion
         setScannedBarcode(res.data[0].BinBarcode || res.data[0].BinCode);
+      } else {
+        setSelectedBin(null);
+        setScannedBarcode('');
       }
       setSugLoading(false);
     } catch (err) {
       console.error(err);
       setSugLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (activeItem && putawayQuantity) {
+      const qty = Number(putawayQuantity);
+      if (qty > 0 && qty <= activeItem.PendingPutawayQty) {
+        if (qty === activeItem.PendingPutawayQty) {
+          return;
+        }
+        const delayDebounce = setTimeout(() => {
+          fetchSuggestions(activeItem.ItemId, qty);
+        }, 500);
+        return () => clearTimeout(delayDebounce);
+      } else {
+        setSuggestions([]);
+        setSelectedBin(null);
+        setScannedBarcode('');
+      }
+    }
+  }, [putawayQuantity, activeItem?.ItemId]);
+
+  const openPutawayDialog = async (item: any) => {
+    setActiveItem(item);
+    setSelectedBin(null);
+    setManualBinCode('');
+    setScannedBarcode('');
+    setSuggestions([]);
+    setPutawayQuantity(item.PendingPutawayQty);
+    
+    // Fetch immediately on open
+    await fetchSuggestions(item.ItemId, item.PendingPutawayQty);
   };
 
   const handleManualBinCodeChange = (code: string) => {
@@ -134,11 +162,17 @@ export default function Putaway() {
       return;
     }
 
+    const qty = Number(putawayQuantity);
+    if (isNaN(qty) || qty <= 0 || qty > activeItem.PendingPutawayQty) {
+      toast.showError(`Invalid quantity. Must be a number between 1 and ${activeItem.PendingPutawayQty}.`);
+      return;
+    }
+
     try {
       await api.post('/putaway/execute', {
         grnDetailId: activeItem.GRNDetailId,
         binId: targetBinId,
-        quantity: activeItem.PendingPutawayQty
+        quantity: qty
       });
       toast.showSuccess(`Putaway for ${activeItem.ItemName} completed successfully.`);
       setActiveItem(null);
@@ -303,7 +337,7 @@ export default function Putaway() {
                           <ListItemIcon><MapPin size={16} color={isSelected ? '#1a73e8' : '#64748b'} /></ListItemIcon>
                           <ListItemText 
                             primary={<Typography variant="body2" sx={{ fontWeight: 600 }}>{bin.BinCode}</Typography>}
-                            secondary={`Zone: ${bin.ZoneName} | Available Wt: ${bin.AvailableWeight}kg | Vol: ${bin.AvailableVolume}L`} 
+                            secondary={`Zone: ${bin.ZoneName} | Available Wt: ${bin.AvailableWeight}kg | Vol: ${bin.AvailableVolume}L${bin.MaxQtyItCanTake !== undefined ? ` (Can hold max ${bin.MaxQtyItCanTake} units)` : ''}`} 
                           />
                           {isSelected && <Check size={16} color="#1a73e8" />}
                         </ListItemButton>
@@ -329,6 +363,17 @@ export default function Putaway() {
               />
 
               <Divider sx={{ my: 2 }} />
+
+              <TextField 
+                label="Quantity to Putaway" 
+                type="number"
+                size="small" 
+                fullWidth
+                value={putawayQuantity}
+                onChange={(e) => setPutawayQuantity(e.target.value)}
+                sx={{ mb: 2 }}
+                inputProps={{ min: 1, max: activeItem.PendingPutawayQty }}
+              />
 
               <TextField 
                 label="Scan Bin Barcode to Confirm" 

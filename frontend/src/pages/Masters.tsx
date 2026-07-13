@@ -4,7 +4,7 @@ import {
   TableCell, TableContainer, TableHead, TableRow, Dialog, 
   DialogTitle, DialogContent, DialogActions, TextField, 
   FormControl, InputLabel, Select, MenuItem, Switch, FormControlLabel,
-  CircularProgress, Alert, InputAdornment
+  CircularProgress, Alert, InputAdornment, Grid, Divider, Paper
 } from '@mui/material';
 import { Plus, Search, MapPin, Layers, Inbox, ShieldCheck, User, Printer, FileDown, RefreshCw } from 'lucide-react';
 import api from '../services/api';
@@ -34,6 +34,9 @@ export default function Masters() {
   const [barcodeDialogOpen, setBarcodeDialogOpen] = useState(false);
   const [barcodeItem, setBarcodeItem] = useState<any>(null);
   const [isBinPrint, setIsBinPrint] = useState(false);
+  const [selectedBinDetails, setSelectedBinDetails] = useState<any>(null);
+  const [isBinDetailsOpen, setIsBinDetailsOpen] = useState(false);
+  const [binDetailsLoading, setBinDetailsLoading] = useState(false);
   const toast = useToast();
 
   // Search & Pagination State
@@ -427,6 +430,20 @@ export default function Masters() {
     });
     setIsBinPrint(true);
     setBarcodeDialogOpen(true);
+  };
+
+  const handleBinCodeClick = async (bin: any) => {
+    setBinDetailsLoading(true);
+    setIsBinDetailsOpen(true);
+    try {
+      const res = await api.get(`/masters/bins/${bin.BinId}/details`);
+      setSelectedBinDetails(res.data);
+    } catch (err) {
+      toast.showError('Failed to load bin details');
+      setIsBinDetailsOpen(false);
+    } finally {
+      setBinDetailsLoading(false);
+    }
   };
 
   const handleInputChange = (e: any) => {
@@ -1011,7 +1028,12 @@ export default function Masters() {
                         {tabValue === 4 && (
                           <>
                             <TableCell>{row.BinId}</TableCell>
-                            <TableCell sx={{ fontWeight: 600 }}>{row.Code}</TableCell>
+                            <TableCell 
+                              sx={{ fontWeight: 600, color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                              onClick={() => handleBinCodeClick(row)}
+                            >
+                              {row.Code}
+                            </TableCell>
                             <TableCell><code>{row.Barcode || 'N/A'}</code></TableCell>
                             <TableCell>{row.CapacityWeight}kg / {row.CapacityVolume}L</TableCell>
                             <TableCell>{row.OccupiedWeight}kg / {row.OccupiedVolume}L</TableCell>
@@ -1347,6 +1369,110 @@ export default function Masters() {
         onConfirm={confirmDelete}
         onCancel={() => { setConfirmOpen(false); setDeleteTarget(null); }}
       />
+
+      {/* Bin Contents Details Dialog */}
+      <Dialog 
+        open={isBinDetailsOpen} 
+        onClose={() => {
+          setIsBinDetailsOpen(false);
+          setSelectedBinDetails(null);
+        }} 
+        fullWidth 
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>
+          Bin Locator Space & Contents Details
+        </DialogTitle>
+        <DialogContent dividers>
+          {binDetailsLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+              <CircularProgress size={36} />
+            </Box>
+          ) : selectedBinDetails ? (
+            <Box>
+              <Typography variant="subtitle1" fontWeight={700} color="primary" gutterBottom>
+                Locator Code: {selectedBinDetails.bin.Code}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Barcode: <code>{selectedBinDetails.bin.Barcode || 'N/A'}</code>
+              </Typography>
+
+              <Box sx={{ mt: 2, mb: 3 }}>
+                <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                  Space & Capacity Occupancy
+                </Typography>
+                <Grid container spacing={2} sx={{ mb: 1 }}>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">WEIGHT CAPACITY</Typography>
+                    <Typography variant="body2" fontWeight={700}>
+                      {selectedBinDetails.bin.OccupiedWeight} kg / {selectedBinDetails.bin.CapacityWeight} kg
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Available: {selectedBinDetails.bin.CapacityWeight - selectedBinDetails.bin.OccupiedWeight} kg
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">VOLUME CAPACITY</Typography>
+                    <Typography variant="body2" fontWeight={700}>
+                      {selectedBinDetails.bin.OccupiedVolume} L / {selectedBinDetails.bin.CapacityVolume} L
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Available: {selectedBinDetails.bin.CapacityVolume - selectedBinDetails.bin.OccupiedVolume} L
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
+                Stored Products Inventory
+              </Typography>
+              
+              {selectedBinDetails.items.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', py: 2 }}>
+                  This storage bin locator is currently empty.
+                </Typography>
+              ) : (
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead sx={{ bgcolor: 'action.hover' }}>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 600 }}>Item Code</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Item Name</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>Batch</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }} align="right">Qty</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {selectedBinDetails.items.map((item: any) => (
+                        <TableRow key={item.InventoryId}>
+                          <TableCell>{item.ItemCode}</TableCell>
+                          <TableCell>{item.ItemName}</TableCell>
+                          <TableCell>{item.BatchNumber || 'None'}</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700 }}>{item.Quantity}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Box>
+          ) : (
+            <Typography variant="body2">No details loaded.</Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => {
+              setIsBinDetailsOpen(false);
+              setSelectedBinDetails(null);
+            }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

@@ -117,8 +117,8 @@ export class GrnController {
       // 3. Post to Busy ERP HTTP API
       const erpResult = await new Promise<{ success: boolean; message: string }>((resolve) => {
         const options = {
-          hostname: '192.168.1.11',
-          port: 999,
+          hostname: process.env.BUSY_ERP_HOST || '192.168.1.11',
+          port: parseInt(process.env.BUSY_ERP_PORT || '999'),
           path: '/',
           method: 'POST',
           headers: {
@@ -126,8 +126,8 @@ export class GrnController {
             'Date': dateStr,
             'VchType': '4',
             'TranType': '3',
-            'UserName': 'Nilesh',
-            'Pwd': 'tppl@12_34',
+            'UserName': process.env.BUSY_ERP_USERNAME || 'Nilesh',
+            'Pwd': process.env.BUSY_ERP_PASSWORD || 'tppl@12_34',
             'Content-Type': 'application/xml',
             'VchXml': xmlStr
           }
@@ -688,8 +688,8 @@ export class GrnController {
       // 4. Send request to ERP
       const erpResult = await new Promise<{ success: boolean; message: string }>((resolve) => {
         const options = {
-          hostname: '192.168.1.11',
-          port: 999,
+          hostname: process.env.BUSY_ERP_HOST || '192.168.1.11',
+          port: parseInt(process.env.BUSY_ERP_PORT || '999'),
           path: '/',
           method: 'POST',
           headers: {
@@ -697,8 +697,8 @@ export class GrnController {
             'Date': dateStr,
             'VchType': '4',
             'TranType': '3',
-            'UserName': 'Nilesh',
-            'Pwd': 'tppl@12_34',
+            'UserName': process.env.BUSY_ERP_USERNAME || 'Nilesh',
+            'Pwd': process.env.BUSY_ERP_PASSWORD || 'tppl@12_34',
             'Content-Type': 'application/xml',
             'VchXml': xmlStr
           }

@@ -60,6 +60,9 @@ export class PutawayController {
 
       return res.json({ message: 'Putaway completed successfully' });
     } catch (err: any) {
+      if (err.sqlState === '45000') {
+        return res.status(400).json({ message: err.message });
+      }
       console.error('Putaway execution failed:', err);
       return res.status(500).json({ message: err.message });
     }

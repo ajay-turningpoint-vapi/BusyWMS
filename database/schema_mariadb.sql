@@ -939,7 +939,11 @@ BEGIN
         z.Name AS ZoneName,
         IF(EXISTS(
             SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.ItemId = p_ItemId
-        ), 1, 0) AS HasExistingStock
+        ), 1, 0) AS HasExistingStock,
+        FLOOR(LEAST(
+            (b.CapacityWeight - b.OccupiedWeight) / v_ItemWeight,
+            (b.CapacityVolume - b.OccupiedVolume) / v_ItemVolume
+        )) AS MaxQtyItCanTake
     FROM tblBin b
     INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
     INNER JOIN tblRack r  ON s.RackId = r.RackId
@@ -947,8 +951,15 @@ BEGIN
     INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
     WHERE w.WarehouseId = p_PreferredWarehouseId
       AND b.IsActive = 1
-      AND (b.CapacityWeight - b.OccupiedWeight) >= @ReqWeight
-      AND (b.CapacityVolume - b.OccupiedVolume) >= @ReqVolume
+      AND (b.CapacityWeight - b.OccupiedWeight) >= v_ItemWeight
+      AND (b.CapacityVolume - b.OccupiedVolume) >= v_ItemVolume
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM tblInventory i2 
+          WHERE i2.BinId = b.BinId 
+            AND i2.ItemId != p_ItemId 
+            AND i2.Quantity > 0
+      )
     ORDER BY HasExistingStock DESC,
              (b.CapacityWeight - b.OccupiedWeight) ASC
     LIMIT 5;
@@ -1221,6 +1232,30 @@ DELIMITER ;
 -- ============================================================
 
 DELIMITER //
+
+CREATE TRIGGER tr_tblInventory_PreventMixedProducts_Insert
+BEFORE INSERT ON tblInventory
+FOR EACH ROW
+BEGIN
+    IF NEW.Quantity > 0 AND EXISTS (
+        SELECT 1 FROM tblInventory 
+        WHERE BinId = NEW.BinId AND ItemId != NEW.ItemId AND Quantity > 0
+    ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Operation failed: Target bin already contains a different product.';
+    END IF;
+END //
+
+CREATE TRIGGER tr_tblInventory_PreventMixedProducts_Update
+BEFORE UPDATE ON tblInventory
+FOR EACH ROW
+BEGIN
+    IF NEW.Quantity > 0 AND EXISTS (
+        SELECT 1 FROM tblInventory 
+        WHERE BinId = NEW.BinId AND ItemId != NEW.ItemId AND Quantity > 0
+    ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Operation failed: Target bin already contains a different product.';
+    END IF;
+END //
 
 CREATE TRIGGER tr_InventoryAudit_Insert
 AFTER INSERT ON tblInventory

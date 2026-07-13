@@ -103,6 +103,7 @@ app.put('/api/masters/shelves/:id', authenticateJWT, requirePermission('Masters'
 app.delete('/api/masters/shelves/:id', authenticateJWT, requirePermission('Masters', 'delete'), MasterController.deleteShelf);
 
 app.get('/api/masters/bins', authenticateJWT, requirePermission('Masters', 'read'), MasterController.getBins);
+app.get('/api/masters/bins/:id/details', authenticateJWT, requirePermission('Masters', 'read'), MasterController.getBinDetails);
 app.post('/api/masters/bins', authenticateJWT, requirePermission('Masters', 'create'), MasterController.createBin);
 app.put('/api/masters/bins/:id', authenticateJWT, requirePermission('Masters', 'update'), MasterController.updateBin);
 app.delete('/api/masters/bins/:id', authenticateJWT, requirePermission('Masters', 'delete'), MasterController.deleteBin);
@@ -296,6 +297,10 @@ db.connect().then(async () => {
   server.listen(PORT, () => {
     console.log(`BusyWMS API running on port ${PORT}`);
     console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
+    console.log('Busy ERP HTTP API configuration:');
+    console.log(` - Host: ${process.env.BUSY_ERP_HOST || '192.168.1.11'}`);
+    console.log(` - Port: ${process.env.BUSY_ERP_PORT || '999'}`);
+    console.log(` - User: ${process.env.BUSY_ERP_USERNAME || 'Nilesh'}`);
   });
 }).catch(err => {
   console.error('Failed to initialize database connection:', err);

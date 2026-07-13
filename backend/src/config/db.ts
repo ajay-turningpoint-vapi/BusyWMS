@@ -53,6 +53,9 @@ class DatabaseConnection {
       const [rows] = await this.mariadbPool!.query(mysqlSql, values);
       return rows as T[];
     } catch (err: any) {
+      if (err.sqlState === '45000') {
+        throw err;
+      }
       console.error('[DATABASE ERROR query]:', err, { sql, params });
       throw new Error('A secure database operation error occurred. Details logged on server.');
     }
@@ -76,6 +79,9 @@ class DatabaseConnection {
         lastID: result.insertId || undefined
       };
     } catch (err: any) {
+      if (err.sqlState === '45000') {
+        throw err;
+      }
       console.error('[DATABASE ERROR executeCmd]:', err, { sql, params });
       throw new Error('A secure database operation error occurred. Details logged on server.');
     }
@@ -112,6 +118,9 @@ class DatabaseConnection {
       }
       return [] as T[];
     } catch (err: any) {
+      if (err.sqlState === '45000') {
+        throw err;
+      }
       console.error('[DATABASE ERROR executeSp]:', err, { spName, params });
       throw new Error('A secure database operation error occurred. Details logged on server.');
     }
@@ -159,6 +168,9 @@ export class TransactionContext {
       const [rows] = await this.conn.query(mysqlSql, values);
       return rows as T[];
     } catch (err: any) {
+      if (err.sqlState === '45000') {
+        throw err;
+      }
       console.error('[DATABASE ERROR tx.query]:', err, { sql, params });
       throw new Error('A secure database operation error occurred. Details logged on server.');
     }
@@ -181,6 +193,9 @@ export class TransactionContext {
         lastID: result.insertId || undefined
       };
     } catch (err: any) {
+      if (err.sqlState === '45000') {
+        throw err;
+      }
       console.error('[DATABASE ERROR tx.executeCmd]:', err, { sql, params });
       throw new Error('A secure database operation error occurred. Details logged on server.');
     }
@@ -216,6 +231,9 @@ export class TransactionContext {
       }
       return [] as T[];
     } catch (err: any) {
+      if (err.sqlState === '45000') {
+        throw err;
+      }
       console.error('[DATABASE ERROR tx.executeSp]:', err, { spName, params });
       throw new Error('A secure database operation error occurred. Details logged on server.');
     }
