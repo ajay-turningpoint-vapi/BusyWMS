@@ -282,6 +282,40 @@ app.use((err: any, req: any, res: any, next: any) => {
   res.status(500).json({ message: 'Internal server error', error: err.message });
 });
 
+function checkErpConnection() {
+  const host = process.env.BUSY_ERP_HOST || '192.168.1.11';
+  const port = parseInt(process.env.BUSY_ERP_PORT || '999', 10);
+  
+  const options = {
+    hostname: host,
+    port: port,
+    path: '/',
+    method: 'GET',
+    timeout: 5000
+  };
+
+  const req = http.request(options, (res) => {
+    let data = '';
+    res.on('data', (chunk) => {
+      data += chunk;
+    });
+    res.on('end', () => {
+      console.log('Connected to ERP successfully.');
+    });
+  });
+
+  req.on('timeout', () => {
+    req.destroy();
+    console.log('Warning: Cannot connect to ERP system (Timeout).');
+  });
+
+  req.on('error', (err: any) => {
+    console.log('Warning: Cannot connect to ERP system.');
+  });
+
+  req.end();
+}
+
 // Database and Server Startup
 db.connect().then(async () => {
   // Initialize MSSQL connection and log result
@@ -294,13 +328,12 @@ db.connect().then(async () => {
   // Start Background Sync Scheduler
   syncScheduler.start();
 
+  // Check ERP connection
+  checkErpConnection();
+
   server.listen(PORT, () => {
     console.log(`BusyWMS API running on port ${PORT}`);
     console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
-    console.log('Busy ERP HTTP API configuration:');
-    console.log(` - Host: ${process.env.BUSY_ERP_HOST || '192.168.1.11'}`);
-    console.log(` - Port: ${process.env.BUSY_ERP_PORT || '999'}`);
-    console.log(` - User: ${process.env.BUSY_ERP_USERNAME || 'Nilesh'}`);
   });
 }).catch(err => {
   console.error('Failed to initialize database connection:', err);

@@ -14,12 +14,12 @@ export class GrnController {
         FROM vw_PendingGRN
       `;
       const params: Record<string, any> = {};
-      
+
       if (search) {
         query += ` WHERE (POCode LIKE @search OR VendorName LIKE @search OR VendorCode LIKE @search)`;
         params.search = `%${search}%`;
       }
-      
+
       query += ` ORDER BY OrderDate DESC, POId DESC`;
       const rows = await db.query(query, params);
       return res.json(rows);
@@ -99,7 +99,7 @@ export class GrnController {
           `<UnitName>${item.itemUom || 'SQFT'}</UnitName>` +
           `<AltUnitName>${item.itemUom || 'SQFT'}</AltUnitName>` +
           `<Qty>${item.receivedQty}</Qty>` +
-        `</ItemDetail>`;
+          `</ItemDetail>`;
       });
 
       const xmlStr = `<MaterialReceipt>` +
@@ -112,7 +112,7 @@ export class GrnController {
         `<MasterName1>${vendorName}</MasterName1>` +
         `<MasterName2>TURNING POINT</MasterName2>` +
         `<ItemEntries>${itemDetailsXml}</ItemEntries>` +
-      `</MaterialReceipt>`;
+        `</MaterialReceipt>`;
 
       // 3. Post to Busy ERP HTTP API
       const erpResult = await new Promise<{ success: boolean; message: string }>((resolve) => {
@@ -237,7 +237,7 @@ export class GrnController {
               INSERT INTO tblBatch (ItemId, BatchNumber, ExpiryDate)
               VALUES (@itemId, @batchNumber, @expiryDate)
             `, { itemId: item.itemId, batchNumber: item.batchNumber, expiryDate: item.expiryDate || null });
-            
+
             batchId = batchResult.lastID ?? null;
           }
         }
@@ -279,10 +279,10 @@ export class GrnController {
         await db.executeSp('sp_ProcessGRN', { GRNId: grnId, UserId: userId });
       }
 
-      return res.status(201).json({ 
-        message: isQaEnabled ? 'GRN created successfully' : 'GRN created and auto-approved successfully (QA Bypassed)', 
-        grnId, 
-        grnCode 
+      return res.status(201).json({
+        message: isQaEnabled ? 'GRN created successfully' : 'GRN created and auto-approved successfully (QA Bypassed)',
+        grnId,
+        grnCode
       });
     } catch (err: any) {
       console.error('GRN creation failed:', err);
@@ -388,7 +388,7 @@ export class GrnController {
   // ==========================================
   // PURCHASE ORDER CRUD (MANUAL)
   // ==========================================
-  
+
   public static async getPurchaseOrders(req: AuthenticatedRequest, res: Response) {
     try {
       const page = parseInt(req.query.page as string || '0', 10);
@@ -670,7 +670,7 @@ export class GrnController {
           `<UnitName>${item.itemUom || 'SQFT'}</UnitName>` +
           `<AltUnitName>${item.itemUom || 'SQFT'}</AltUnitName>` +
           `<Qty>${item.ReceivedQty}</Qty>` +
-        `</ItemDetail>`;
+          `</ItemDetail>`;
       });
 
       const xmlStr = `<MaterialReceipt>` +
@@ -683,7 +683,7 @@ export class GrnController {
         `<MasterName1>${vendorName}</MasterName1>` +
         `<MasterName2>TURNING POINT</MasterName2>` +
         `<ItemEntries>${itemDetailsXml}</ItemEntries>` +
-      `</MaterialReceipt>`;
+        `</MaterialReceipt>`;
 
       // 4. Send request to ERP
       const erpResult = await new Promise<{ success: boolean; message: string }>((resolve) => {
