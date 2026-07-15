@@ -568,6 +568,41 @@ export class SyncController {
                 UOM: item.UOM,
                 UnitPrice: item.UnitPrice
               });
+
+              // Check if incoming PO item exceeds MaxStock limit
+              const itemRows = await tx.query('SELECT Code, MaxStock FROM tblItem WHERE ItemId = @ItemId', { ItemId: item.ItemId });
+              if (itemRows.length > 0) {
+                const itemCode = itemRows[0].Code;
+                const maxStock = parseFloat(itemRows[0].MaxStock || '999999');
+                const invRows = await tx.query('SELECT COALESCE(SUM(Quantity), 0) AS CurrentStock FROM tblInventory WHERE ItemId = @ItemId', { ItemId: item.ItemId });
+                const currentStock = parseFloat(invRows[0].CurrentStock || '0');
+                if (currentStock + parseFloat(item.OrderQty) > maxStock) {
+                  await tx.executeCmd(`
+                    INSERT INTO tblNotification (Type, Title, Message, IsRead)
+                    VALUES ('OVER_ORDER_ALERT', 'PO Exceeds Max Stock Limit', @msg, 0)
+                  `, {
+                    msg: `Purchase Order ${po.POCode} has item ${itemCode} with order qty ${item.OrderQty} which (with current stock ${currentStock}) exceeds the MaxStock limit of ${maxStock}.`
+                  });
+
+                  // Log to persistent tblStockAlertLog if not already logged as ACTIVE for this PO
+                  const activeAlert = await tx.query(`
+                    SELECT AlertLogId FROM tblStockAlertLog 
+                    WHERE ItemId = @ItemId AND AlertType = 'ABOVE_MAX' AND Status = 'ACTIVE' AND ReferenceDoc = @refDoc
+                  `, { ItemId: item.ItemId, refDoc: po.POCode });
+                  
+                  if (activeAlert.length === 0) {
+                    await tx.executeCmd(`
+                      INSERT INTO tblStockAlertLog (ItemId, AlertType, CurrentStock, ThresholdValue, ReferenceDoc, Status)
+                      VALUES (@itemId, 'ABOVE_MAX', @currentStock, @thresholdValue, @refDoc, 'ACTIVE')
+                    `, {
+                      itemId: item.ItemId,
+                      currentStock: currentStock + parseFloat(item.OrderQty),
+                      thresholdValue: maxStock,
+                      refDoc: po.POCode
+                    });
+                  }
+                }
+              }
             }
             syncedCount++;
           });

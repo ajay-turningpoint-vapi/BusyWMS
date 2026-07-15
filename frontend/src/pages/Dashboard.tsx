@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Grid, Card, CardContent, Typography, Box, 
   CircularProgress, Alert, LinearProgress, Table, TableBody, 
-  TableCell, TableContainer, TableHead, TableRow, Paper
+  TableCell, TableContainer, TableHead, TableRow, Paper, Button
 } from '@mui/material';
 import { 
   FileCheck, ClipboardList, Package, CheckSquare, 
@@ -34,6 +34,7 @@ interface KPIType {
   totalPendingPOQty: number;
   partiallyDispatchedOrders: number;
   partiallyReceivedPOs: number;
+  belowMinStock: number;
 }
 
 export default function Dashboard() {
@@ -83,7 +84,8 @@ export default function Dashboard() {
     { title: 'Pending Putaway', value: kpi.pendingPutaway, icon: <Package color="#a855f7" />, color: '#faf5ff', path: '/inbound/putaway' },
     { title: 'Pending Reservations', value: kpi.pendingReservations, icon: <CheckSquare color="#10b981" />, color: '#ecfdf5', path: '/outbound/sync' },
     { title: 'Active Pick Lists', value: kpi.pendingPicking, icon: <PlayCircle color="#f97316" />, color: '#fff7ed', path: '/outbound/picking' },
-    { title: 'Pending Dispatch', value: kpi.pendingDispatch, icon: <Package color="#ec4899" />, color: '#fdf2f8', path: '/outbound/dispatch' }
+    { title: 'Pending Dispatch', value: kpi.pendingDispatch, icon: <Package color="#ec4899" />, color: '#fdf2f8', path: '/outbound/dispatch' },
+    { title: 'Reorder Alerts', value: kpi.belowMinStock || 0, icon: <AlertTriangle color="#ef4444" />, color: '#fef2f2', path: '/reports?tab=8' }
   ];
 
   return (
@@ -94,6 +96,20 @@ export default function Dashboard() {
       <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
         Real-time WMS activity tracking & inventory summary.
       </Typography>
+
+      {kpi.belowMinStock > 0 && (
+        <Alert 
+          severity="warning" 
+          action={
+            <Button color="inherit" size="small" onClick={() => navigate('/reports?tab=8')}>
+              View Alerts
+            </Button>
+          }
+          sx={{ mb: 4, fontWeight: 600 }}
+        >
+          {kpi.belowMinStock} item(s) have dropped below their defined Minimum Stock thresholds!
+        </Alert>
+      )}
 
       {/* KPI Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>

@@ -693,6 +693,23 @@ CREATE TABLE tblNotification (
     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+CREATE TABLE tblStockAlertLog (
+    AlertLogId INT AUTO_INCREMENT PRIMARY KEY,
+    ItemId INT NOT NULL,
+    AlertType VARCHAR(20) NOT NULL, -- 'BELOW_MIN', 'ABOVE_MAX'
+    CurrentStock DECIMAL(18,4) NOT NULL,
+    ThresholdValue DECIMAL(18,4) NOT NULL,
+    ReferenceDoc VARCHAR(100) DEFAULT NULL, -- PO Code, Pick List, or GRN Code
+    Status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL, -- 'ACTIVE', 'RESOLVED'
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ResolvedAt DATETIME DEFAULT NULL,
+    FOREIGN KEY (ItemId) REFERENCES tblItem(ItemId)
+) ENGINE=InnoDB;
+
+CREATE INDEX IX_tblStockAlertLog_ItemId ON tblStockAlertLog (ItemId);
+CREATE INDEX IX_tblStockAlertLog_Status ON tblStockAlertLog (Status);
+CREATE INDEX IX_tblStockAlertLog_AlertType ON tblStockAlertLog (AlertType);
+
 CREATE TABLE tblERPConfig (
     ConfigId INT AUTO_INCREMENT PRIMARY KEY,
     CompanyId VARCHAR(50) NOT NULL DEFAULT 'COMP01',
@@ -823,11 +840,19 @@ SELECT
     item.UOM AS ItemUOM,
     pod.OrderQty,
     pod.ReceivedQty,
-    (pod.OrderQty - pod.ReceivedQty) AS PendingQty
+    (pod.OrderQty - pod.ReceivedQty - COALESCE(pending_grn.TotalPendingQty, 0)) AS PendingQty
 FROM tblPurchaseOrder po
 INNER JOIN tblPurchaseOrderDetail pod ON po.POId = pod.POId
 INNER JOIN tblItem item ON pod.ItemId = item.ItemId
-WHERE po.Status IN ('PENDING', 'PARTIAL') AND (pod.OrderQty - pod.ReceivedQty) > 0;
+LEFT JOIN (
+    SELECT gd.ItemId, g.POId, SUM(gd.ReceivedQty) AS TotalPendingQty
+    FROM tblGRNDetail gd
+    INNER JOIN tblGRN g ON gd.GRNId = g.GRNId
+    WHERE g.Status = 'PENDING'
+    GROUP BY gd.ItemId, g.POId
+) pending_grn ON po.POId = pending_grn.POId AND pod.ItemId = pending_grn.ItemId
+WHERE po.Status IN ('PENDING', 'PARTIAL') 
+  AND (pod.OrderQty - pod.ReceivedQty - COALESCE(pending_grn.TotalPendingQty, 0)) > 0;
 
 CREATE VIEW vw_PendingQC AS
 SELECT 
@@ -1442,7 +1467,8 @@ INSERT INTO tblFeatureConfig (Category, FeatureCode, DisplayName, IsEnabled) VAL
 ('MODULE', 'MODULE_DASHBOARD', 'Enterprise KPI Dashboard', 1),
 ('MODULE', 'MODULE_BUSY_INTEGRATION', 'Busy Accounting ERP Auto Sync', 1),
 ('MODULE', 'MODULE_NOTIFICATIONS', 'Email/SMS/In-App Alerts', 0),
-('MODULE', 'MODULE_APPROVAL_WORKFLOW', 'Multi-Level Approval Flow', 0);
+('MODULE', 'MODULE_APPROVAL_WORKFLOW', 'Multi-Level Approval Flow', 0),
+('MODULE', 'MODULE_ASN', 'Advanced Shipment Notice (ASN)', 1);
 
 -- Seed User Settings
 INSERT INTO tblUserSetting (SettingKey, SettingValue, Description) VALUES
@@ -1460,7 +1486,8 @@ INSERT INTO tblUserSetting (SettingKey, SettingValue, Description) VALUES
 ('LABEL_SIZE', '4x6', 'Default label print size (e.g. 4x6, 3x2 inches)'),
 ('EMAIL_NOTIFICATIONS_ENABLED', '0', 'Enable system emails to managers (1=enabled, 0=disabled)'),
 ('SMS_NOTIFICATIONS_ENABLED', '0', 'Enable system SMS alerts (1=enabled, 0=disabled)'),
-('DEFAULT_TAX_RATE', '18.00', 'Default GST tax rate in %');
+('DEFAULT_TAX_RATE', '18.00', 'Default GST tax rate in %'),
+('BLOCK_GRN_ON_MAX_STOCK', '1', 'Block GRN creation if it causes stock to exceed MaxStock (1=block, 0=warn)');
 
 -- Seed Permission Matrix for Roles (Admins have everything; managers/operators have selective actions)
 INSERT INTO tblPermissionMatrix (RoleId, ResourceName, CanRead, CanCreate, CanUpdate, CanDelete) VALUES

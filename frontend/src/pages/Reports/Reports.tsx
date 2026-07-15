@@ -201,6 +201,7 @@ export default function Reports() {
 
   // ASN Reports States
   const [asnReportView, setAsnReportView] = useState('summary');
+  const [replenishmentView, setReplenishmentView] = useState('live');
   const [warehouses, setWarehouses] = useState<any[]>([]);
 
   const loadReport = async (tabIndex: number) => {
@@ -218,6 +219,9 @@ export default function Reports() {
     else if (tabIndex === 4) endpoint = '/reports/audit-logs';
     else if (tabIndex === 6) endpoint = '/reports/bin-capacity';
     else if (tabIndex === 7) endpoint = '/inbound/asn/reports';
+    else if (tabIndex === 8) {
+      endpoint = replenishmentView === 'live' ? '/reports/replenishment' : '/reports/replenishment/logs';
+    }
 
     try {
       const res = await api.get(endpoint, {
@@ -235,7 +239,8 @@ export default function Reports() {
           itemGroup: itemGroupFilter,
           minCapacity: availableCapacityMin,
           emptyBinsOnly,
-          asnReportView
+          asnReportView,
+          replenishmentView
         }
       });
       
@@ -271,7 +276,8 @@ export default function Reports() {
     itemGroupFilter,
     availableCapacityMin,
     emptyBinsOnly,
-    asnReportView
+    asnReportView,
+    replenishmentView
   ]);
 
   useEffect(() => {
@@ -310,11 +316,12 @@ export default function Reports() {
     setItemGroupFilter('');
     setAvailableCapacityMin('');
     setEmptyBinsOnly(false);
+    setReplenishmentView('live');
   }, [tabValue]);
 
   useEffect(() => {
     pagination.resetPage();
-  }, [asnReportView]);
+  }, [asnReportView, replenishmentView]);
 
   // Load warehouses on mount
   useEffect(() => {
@@ -389,7 +396,7 @@ export default function Reports() {
 
   // Helper for ASN data grouping and formatting
   const getProcessedASNData = () => {
-    if (tabValue !== 6) return filteredData;
+    if (tabValue !== 7) return filteredData;
 
     if (asnReportView === 'summary' || asnReportView === 'status' || asnReportView === 'date') {
       const groups: Record<string, any> = {};
@@ -485,6 +492,11 @@ export default function Reports() {
         if (asnReportView === 'supplier') return ['Supplier Name', 'Total ASNs', 'Total Expected Qty', 'Total Received Qty'];
         if (asnReportView === 'date') return ['Expected Date', 'ASN Number', 'Supplier', 'Expected Qty', 'Status'];
         return [];
+      case 8:
+        if (replenishmentView === 'logs') {
+          return ['Date Created', 'Item Code', 'Item Name', 'Category', 'UOM', 'Alert Type', 'Current Stock', 'Threshold Limit', 'Reference Doc', 'Status', 'Date Resolved'];
+        }
+        return ['Item Code', 'Item Name', 'Category', 'UOM', 'Current Stock', 'Min Stock', 'Max Stock', 'Available Storage Space', 'Reorder Target Qty', 'Feasible Qty', 'Status'];
       default:
         return [];
     }
@@ -512,6 +524,11 @@ export default function Reports() {
         if (asnReportView === 'supplier') return ['SupplierName', 'ASNCount', 'ExpectedQty', 'ReceivedQty'];
         if (asnReportView === 'date') return ['ExpectedArrivalDate', 'ASNNumber', 'SupplierName', 'ExpectedQty', 'Status'];
         return [];
+      case 8:
+        if (replenishmentView === 'logs') {
+          return ['CreatedAt', 'ItemCode', 'ItemName', 'Category', 'UOM', 'AlertType', 'CurrentStock', 'ThresholdValue', 'ReferenceDoc', 'Status', 'ResolvedAt'];
+        }
+        return ['ItemCode', 'ItemName', 'Category', 'UOM', 'TotalStock', 'MinStock', 'MaxStock', 'AvailableStorageSpace', 'ReorderQty', 'FeasibleQty', 'StockStatus'];
       default:
         return [];
     }
@@ -519,7 +536,7 @@ export default function Reports() {
 
   // CSV Export
   const exportCSV = () => {
-    const reportNames = ['Stock_Status_Ledger', 'Pending_Sales_Order_Report', 'Pending_Purchase_Order_Report', 'Created_GRNs_Report', 'System_Security_Audit_Trail', '', 'Bin_Capacity_Report', `ASN_${asnReportView}_Report`];
+    const reportNames = ['Stock_Status_Ledger', 'Pending_Sales_Order_Report', 'Pending_Purchase_Order_Report', 'Created_GRNs_Report', 'System_Security_Audit_Trail', '', 'Bin_Capacity_Report', `ASN_${asnReportView}_Report`, 'Replenishment_And_Reorder_Alerts'];
     const headers = getHeaderList();
     const keys = getKeysList();
     
@@ -548,7 +565,7 @@ export default function Reports() {
 
   // PDF & Print Report
   const handlePrint = () => {
-    const titles = ['Stock Status Ledger', 'Pending Sales Order Report', 'Pending Purchase Order Report', 'Created GRNs Report', 'System Security Audit Trail', '', 'Bin Capacity Utilization Report', `ASN ${asnReportView.toUpperCase()} Report`];
+    const titles = ['Stock Status Ledger', 'Pending Sales Order Report', 'Pending Purchase Order Report', 'Created GRNs Report', 'System Security Audit Trail', '', 'Bin Capacity Utilization Report', `ASN ${asnReportView.toUpperCase()} Report`, 'Replenishment & Reorder Alerts'];
     const headers = getHeaderList();
     const keys = getKeysList();
     
@@ -823,6 +840,7 @@ export default function Reports() {
         <Tab label="Barcode Label Generator" />
         <Tab label="Bin Capacity & Suitability" />
         <Tab label="ASN Inbound Notices" />
+        <Tab label="Reorder & Stock Alerts" />
       </Tabs>
 
       {tabValue !== 5 ? (
@@ -914,7 +932,7 @@ export default function Reports() {
               {/* Conditional filters based on Active Tab */}
 
 
-              {tabValue === 6 && (
+              {tabValue === 7 && (
                 <>
                   <Grid item xs={12} sm={3}>
                     <FormControl fullWidth size="small">
@@ -935,8 +953,6 @@ export default function Reports() {
                       </Select>
                     </FormControl>
                   </Grid>
-                  
-
 
                   {['summary', 'status', 'date'].includes(asnReportView) && (
                     <Grid item xs={12} sm={3}>
@@ -963,7 +979,25 @@ export default function Reports() {
                 </>
               )}
 
-              {(tabValue === 1 || tabValue === 2 || tabValue === 3) && (
+              {tabValue === 8 && (
+                <Grid item xs={12} sm={3}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel id="replenishment-view-filter-label">Report View</InputLabel>
+                    <Select
+                      labelId="replenishment-view-filter-label"
+                      id="replenishment-view-filter-select"
+                      value={replenishmentView}
+                      label="Report View"
+                      onChange={(e) => setReplenishmentView(e.target.value)}
+                    >
+                      <MenuItem value="live">Live Alerts</MenuItem>
+                      <MenuItem value="logs">Alert Audit Log</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              )}
+
+              {(tabValue === 1 || tabValue === 2 || tabValue === 3 || tabValue === 8) && (
                 <Grid item xs={12} sm={3}>
                   <FormControl fullWidth size="small">
                     <InputLabel id="status-filter-label">Status</InputLabel>
@@ -974,24 +1008,35 @@ export default function Reports() {
                       label="Status"
                       onChange={(e) => setStatusInput(e.target.value)}
                     >
-                      <MenuItem value="">All Statuses</MenuItem>
-                      {tabValue === 1 ? (
+                      {tabValue === 8 ? (
                         <>
-                          <MenuItem value="Pending">Pending</MenuItem>
-                          <MenuItem value="Partially Dispatched">Partially Dispatched</MenuItem>
-                          <MenuItem value="Fully Dispatched">Fully Dispatched</MenuItem>
-                        </>
-                      ) : tabValue === 2 ? (
-                        <>
-                          <MenuItem value="Pending">Pending</MenuItem>
-                          <MenuItem value="Partially Received">Partially Received</MenuItem>
-                          <MenuItem value="Fully Received">Fully Received</MenuItem>
+                          <MenuItem value="ALL_ALERTS">All Alerts</MenuItem>
+                          <MenuItem value="BELOW_MIN">Below Min Stock</MenuItem>
+                          <MenuItem value="ABOVE_MAX">Above Max Stock</MenuItem>
+                          <MenuItem value="ALL">All Items</MenuItem>
                         </>
                       ) : (
                         <>
-                          <MenuItem value="PENDING">Pending QC</MenuItem>
-                          <MenuItem value="QC_COMPLETED">QC Completed</MenuItem>
-                          <MenuItem value="PUTAWAY_COMPLETED">Putaway Completed</MenuItem>
+                          <MenuItem value="">All Statuses</MenuItem>
+                          {tabValue === 1 ? (
+                            <>
+                              <MenuItem value="Pending">Pending</MenuItem>
+                              <MenuItem value="Partially Dispatched">Partially Dispatched</MenuItem>
+                              <MenuItem value="Fully Dispatched">Fully Dispatched</MenuItem>
+                            </>
+                          ) : tabValue === 2 ? (
+                            <>
+                              <MenuItem value="Pending">Pending</MenuItem>
+                              <MenuItem value="Partially Received">Partially Received</MenuItem>
+                              <MenuItem value="Fully Received">Fully Received</MenuItem>
+                            </>
+                          ) : (
+                            <>
+                              <MenuItem value="PENDING">Pending QC</MenuItem>
+                              <MenuItem value="QC_COMPLETED">QC Completed</MenuItem>
+                              <MenuItem value="PUTAWAY_COMPLETED">Putaway Completed</MenuItem>
+                            </>
+                          )}
                         </>
                       )}
                     </Select>
@@ -1087,7 +1132,7 @@ export default function Reports() {
 
           {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-          {tabValue === 5 && !loading && (
+          {tabValue === 6 && !loading && (
             <Grid container spacing={2} sx={{ mb: 3 }}>
               <Grid item xs={12} sm={3}>
                 <Card sx={{ p: 2, bgcolor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1, borderStyle: 'solid', boxShadow: 'none' }}>
@@ -1309,11 +1354,41 @@ export default function Reports() {
                           )}
                         </>
                       )}
+                      {tabValue === 8 && replenishmentView === 'live' && (
+                        <>
+                          <TableCell sx={{ fontWeight: 600 }}>Item Code</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Item Name</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Category</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>UOM</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="right">Current Stock</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="right">Min Stock</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="right">Max Stock</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="right">Available Storage Space</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="right">Reorder Target Qty</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="right">Feasible Qty</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
+                        </>
+                      )}
+                      {tabValue === 8 && replenishmentView === 'logs' && (
+                        <>
+                          <TableCell sx={{ fontWeight: 600 }}>Date Created</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Item Code</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Item Name</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Category</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>UOM</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Alert Type</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="right">Current Stock</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }} align="right">Threshold Limit</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Reference Doc</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Date Resolved</TableCell>
+                        </>
+                      )}
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {(() => {
-                      const baseData = tabValue === 6 ? finalReportData : filteredData;
+                      const baseData = tabValue === 7 ? finalReportData : filteredData;
                       return baseData;
                     })().map((row: any, idx: number) => (
                       <TableRow key={idx} hover>
@@ -1638,7 +1713,7 @@ export default function Reports() {
                                 <TableCell align="right">{row.ReceivedQty} PCS</TableCell>
                               </>
                             )}
-                            {asnReportView === 'date' && (
+                             {asnReportView === 'date' && (
                               <>
                                 <TableCell>{new Date(row.ExpectedArrivalDate).toLocaleDateString()}</TableCell>
                                 <TableCell><TransactionLink type="ASN" id={row.ASNId} label={row.ASNNumber} /></TableCell>
@@ -1651,12 +1726,66 @@ export default function Reports() {
                             )}
                           </>
                         )}
+
+                        {/* Tab 8: Reorder & Stock Alerts */}
+                        {tabValue === 8 && replenishmentView === 'live' && (
+                          <>
+                            <TableCell><code>{row.ItemCode}</code></TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.ItemName}</TableCell>
+                            <TableCell>{row.Category}</TableCell>
+                            <TableCell>{row.UOM}</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 600 }}>{row.TotalStock}</TableCell>
+                            <TableCell align="right">{row.MinStock}</TableCell>
+                            <TableCell align="right">{row.MaxStock}</TableCell>
+                            <TableCell align="right" sx={{ color: 'info.main', fontWeight: 600 }}>{row.AvailableStorageSpace}</TableCell>
+                            <TableCell align="right" sx={{ color: 'warning.main', fontWeight: 600 }}>{row.ReorderQty || 0}</TableCell>
+                            <TableCell align="right" sx={{ color: 'success.main', fontWeight: 700 }}>{row.FeasibleQty || 0}</TableCell>
+                            <TableCell>
+                              <Chip 
+                                size="small" 
+                                label={row.StockStatus === 'BELOW_MIN' ? 'Below Min' : row.StockStatus === 'ABOVE_MAX' ? 'Exceeds Max' : 'Normal'}
+                                color={row.StockStatus === 'BELOW_MIN' ? 'error' : row.StockStatus === 'ABOVE_MAX' ? 'warning' : 'success'}
+                                sx={{ fontWeight: 700 }}
+                              />
+                            </TableCell>
+                          </>
+                        )}
+                        {tabValue === 8 && replenishmentView === 'logs' && (
+                          <>
+                            <TableCell>{new Date(row.CreatedAt).toLocaleString()}</TableCell>
+                            <TableCell><code>{row.ItemCode}</code></TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{row.ItemName}</TableCell>
+                            <TableCell>{row.Category}</TableCell>
+                            <TableCell>{row.UOM}</TableCell>
+                            <TableCell>
+                              <Chip 
+                                size="small" 
+                                label={row.AlertType === 'BELOW_MIN' ? 'Below Min' : 'Exceeds Max'}
+                                color={row.AlertType === 'BELOW_MIN' ? 'error' : 'warning'}
+                                sx={{ fontWeight: 700 }}
+                              />
+                            </TableCell>
+                            <TableCell align="right">{row.CurrentStock}</TableCell>
+                            <TableCell align="right">{row.ThresholdValue}</TableCell>
+                            <TableCell>{row.ReferenceDoc || 'N/A'}</TableCell>
+                            <TableCell>
+                              <Chip 
+                                size="small" 
+                                label={row.Status}
+                                color={row.Status === 'ACTIVE' ? 'error' : 'success'}
+                                variant={row.Status === 'ACTIVE' ? 'filled' : 'outlined'}
+                                sx={{ fontWeight: 700 }}
+                              />
+                            </TableCell>
+                            <TableCell>{row.ResolvedAt ? new Date(row.ResolvedAt).toLocaleString() : 'N/A'}</TableCell>
+                          </>
+                        )}
                       </TableRow>
                     ))}
                     
                     {getSourceData().length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={tabValue === 0 ? 9 : (tabValue === 1 || tabValue === 2 ? 11 : (tabValue === 3 ? 7 : (tabValue === 6 ? 8 : (tabValue === 7 ? (asnReportView === 'summary' || asnReportView === 'pending' || asnReportView === 'variance' ? 8 : asnReportView === 'status' ? 6 : asnReportView === 'supplier' ? 4 : 5) : 8))))} align="center" sx={{ py: 5 }}>
+                        <TableCell colSpan={tabValue === 0 ? 9 : (tabValue === 1 || tabValue === 2 ? 11 : (tabValue === 3 ? 7 : (tabValue === 6 ? 8 : (tabValue === 7 ? (asnReportView === 'summary' || asnReportView === 'pending' || asnReportView === 'variance' ? 8 : asnReportView === 'status' ? 6 : asnReportView === 'supplier' ? 4 : 5) : (tabValue === 8 ? 11 : 8)))))} align="center" sx={{ py: 5 }}>
                           <Paper variant="outlined" sx={{ py: 3, px: 2, display: 'inline-block', maxWidth: 400, bgcolor: 'transparent', borderStyle: 'dashed' }}>
                             <Search size={32} style={{ color: '#94a3b8', marginBottom: '8px' }} />
                             <Typography variant="subtitle1" fontWeight={600} color="text.secondary">No matching data found</Typography>

@@ -57,11 +57,19 @@ SELECT
     item.UOM AS ItemUOM,
     pod.OrderQty,
     pod.ReceivedQty,
-    (pod.OrderQty - pod.ReceivedQty) AS PendingQty
+    (pod.OrderQty - pod.ReceivedQty - COALESCE(pending_grn.TotalPendingQty, 0)) AS PendingQty
 FROM tblPurchaseOrder po
 INNER JOIN tblPurchaseOrderDetail pod ON po.POId = pod.POId
 INNER JOIN tblItem item ON pod.ItemId = item.ItemId
-WHERE po.Status IN ('PENDING', 'PARTIAL') AND (pod.OrderQty - pod.ReceivedQty) > 0;
+LEFT JOIN (
+    SELECT gd.ItemId, g.POId, SUM(gd.ReceivedQty) AS TotalPendingQty
+    FROM tblGRNDetail gd
+    INNER JOIN tblGRN g ON gd.GRNId = g.GRNId
+    WHERE g.Status = 'PENDING'
+    GROUP BY gd.ItemId, g.POId
+) pending_grn ON po.POId = pending_grn.POId AND pod.ItemId = pending_grn.ItemId
+WHERE po.Status IN ('PENDING', 'PARTIAL') 
+  AND (pod.OrderQty - pod.ReceivedQty - COALESCE(pending_grn.TotalPendingQty, 0)) > 0;
 GO
 
 -- 3. vw_PendingQC: GRN arrivals awaiting inspection

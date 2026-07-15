@@ -264,6 +264,8 @@ app.get('/api/reports/created-grns', authenticateJWT, ReportController.getCreate
 app.get('/api/reports/po-grn-history/:poId', authenticateJWT, ReportController.getPOGrnHistory);
 app.get('/api/reports/so-dispatch-history/:soId', authenticateJWT, ReportController.getSODispatchHistory);
 app.get('/api/reports/bin-capacity', authenticateJWT, ReportController.getBinCapacities);
+app.get('/api/reports/replenishment', authenticateJWT, ReportController.getReplenishmentReport);
+app.get('/api/reports/replenishment/logs', authenticateJWT, ReportController.getReplenishmentLogs);
 app.get('/api/transactions/search', authenticateJWT, ReportController.searchTransactions);
 app.get('/api/transactions/:type/:id', authenticateJWT, ReportController.getTransactionDetails);
 app.put('/api/transactions/:type/:id', authenticateJWT, ReportController.updateTransaction);

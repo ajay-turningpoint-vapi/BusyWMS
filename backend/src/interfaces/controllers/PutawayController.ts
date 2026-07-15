@@ -58,6 +58,40 @@ export class PutawayController {
         return res.status(400).json({ message: result[0].Message });
       }
 
+      // Check if this putaway resolves any active stock alerts (BELOW_MIN or ABOVE_MAX)
+      try {
+        const detailRows = await db.query('SELECT ItemId FROM tblGRNDetail WHERE GRNDetailId = @grnDetailId', { grnDetailId });
+        if (detailRows.length > 0) {
+          const itemId = detailRows[0].ItemId;
+          const itemDef = await db.query('SELECT MinStock, MaxStock FROM tblItem WHERE ItemId = @itemId', { itemId });
+          if (itemDef.length > 0) {
+            const minStock = parseFloat(itemDef[0].MinStock || '0');
+            const maxStock = parseFloat(itemDef[0].MaxStock || '999999');
+            
+            const stockSum = await db.query('SELECT COALESCE(SUM(Quantity), 0) AS total FROM tblInventory WHERE ItemId = @itemId', { itemId });
+            const totalStock = parseFloat(stockSum[0].total || '0');
+
+            if (totalStock >= minStock) {
+              await db.executeCmd(`
+                UPDATE tblStockAlertLog 
+                SET Status = 'RESOLVED', ResolvedAt = CURRENT_TIMESTAMP 
+                WHERE ItemId = @itemId AND AlertType = 'BELOW_MIN' AND Status = 'ACTIVE'
+              `, { itemId });
+            }
+
+            if (totalStock <= maxStock) {
+              await db.executeCmd(`
+                UPDATE tblStockAlertLog 
+                SET Status = 'RESOLVED', ResolvedAt = CURRENT_TIMESTAMP 
+                WHERE ItemId = @itemId AND AlertType = 'ABOVE_MAX' AND Status = 'ACTIVE'
+              `, { itemId });
+            }
+          }
+        }
+      } catch (alertErr) {
+        console.error('Failed to automatically resolve stock alerts:', alertErr);
+      }
+
       return res.json({ message: 'Putaway completed successfully' });
     } catch (err: any) {
       if (err.sqlState === '45000') {

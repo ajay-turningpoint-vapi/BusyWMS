@@ -293,10 +293,29 @@ export class OutboundController {
         if (itemDef.length > 0 && itemDef[0].MinStock !== null && remainingQty < Number(itemDef[0].MinStock)) {
           const minStock = Number(itemDef[0].MinStock);
           const itemName = itemDef[0].Name;
+          
           await db.executeCmd(`
             INSERT INTO tblNotification (Type, Title, Message, IsRead, CreatedAt)
             VALUES ('LOW_STOCK', 'Low Stock Alert', @msg, 0, CURRENT_TIMESTAMP)
           `, { msg: `Inventory level for '${itemName}' has fallen to ${remainingQty} UOM, which is below the defined MinStock threshold of ${minStock} UOM.` });
+
+          // Log to persistent tblStockAlertLog if not already logged as ACTIVE
+          const activeLog = await db.query(`
+            SELECT AlertLogId FROM tblStockAlertLog 
+            WHERE ItemId = @itemId AND AlertType = 'BELOW_MIN' AND Status = 'ACTIVE'
+          `, { itemId: pd.ItemId });
+          
+          if (activeLog.length === 0) {
+            await db.executeCmd(`
+              INSERT INTO tblStockAlertLog (ItemId, AlertType, CurrentStock, ThresholdValue, ReferenceDoc, Status)
+              VALUES (@itemId, 'BELOW_MIN', @currentStock, @thresholdValue, @refDoc, 'ACTIVE')
+            `, {
+              itemId: pd.ItemId,
+              currentStock: remainingQty,
+              thresholdValue: minStock,
+              refDoc: `PK-${pickListId}`
+            });
+          }
         }
 
         // 3. Update bin occupied capacity (deduct weight)

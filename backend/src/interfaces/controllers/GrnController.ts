@@ -56,6 +56,28 @@ export class GrnController {
         return res.status(400).json({ message: 'At least one item must have a received quantity greater than zero' });
       }
 
+      // Max stock validation check (enforce BLOCK_GRN_ON_MAX_STOCK setting)
+      const maxStockSetting = await db.query("SELECT SettingValue FROM tblUserSetting WHERE SettingKey = 'BLOCK_GRN_ON_MAX_STOCK'");
+      const blockOnMaxStock = maxStockSetting.length > 0 ? maxStockSetting[0].SettingValue === '1' : true;
+
+      for (const item of validItems) {
+        const itemRows = await db.query('SELECT Code, Name, MaxStock FROM tblItem WHERE ItemId = @itemId', { itemId: item.itemId });
+        if (itemRows.length > 0) {
+          const itemCode = itemRows[0].Code;
+          const maxStock = parseFloat(itemRows[0].MaxStock || '999999');
+          
+          const invRows = await db.query('SELECT COALESCE(SUM(Quantity), 0) AS CurrentStock FROM tblInventory WHERE ItemId = @itemId', { itemId: item.itemId });
+          const currentStock = parseFloat(invRows[0].CurrentStock || '0');
+          const newStock = currentStock + parseFloat(item.receivedQty);
+
+          if (newStock > maxStock && blockOnMaxStock) {
+            return res.status(400).json({
+              message: `Validation Blocked: Receiving ${item.receivedQty} units of item ${itemCode} would cause total stock (${newStock}) to exceed the maximum capacity limit of ${maxStock}.`
+            });
+          }
+        }
+      }
+
       // 2. Fetch PO & Item details to construct XML payload
       let poCode = '';
       let vendorName = '';

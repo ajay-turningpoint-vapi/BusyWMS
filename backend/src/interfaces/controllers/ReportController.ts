@@ -106,6 +106,17 @@ export class ReportController {
         GROUP BY w.Code
       `);
 
+      // 12. Items below Min Stock count
+      const belowMinCount = await db.query(`
+        SELECT COUNT(*) AS count FROM (
+          SELECT item.ItemId
+          FROM tblItem item
+          LEFT JOIN tblInventory inv ON item.ItemId = inv.ItemId
+          GROUP BY item.ItemId, item.MinStock
+          HAVING COALESCE(SUM(inv.Quantity), 0) < item.MinStock
+        ) t
+      `);
+
       const warehouseUtil = occupancy.map((o: any) => ({
         name: o.Code,
         utilization: Math.round((o.occWeight / o.capWeight) * 100)
@@ -176,7 +187,8 @@ export class ReportController {
           totalPendingPO: pendingPOSummary[0]?.pendingOrdersCount || 0,
           totalPendingPOQty: Math.round(pendingPOSummary[0]?.pendingQtySum || 0),
           partiallyDispatchedOrders: partiallyDispatched[0]?.count || 0,
-          partiallyReceivedPOs: partiallyReceived[0]?.count || 0
+          partiallyReceivedPOs: partiallyReceived[0]?.count || 0,
+          belowMinStock: belowMinCount[0]?.count || 0
         },
         trends: {
           inbound: inboundTrend,
@@ -1302,6 +1314,184 @@ export class ReportController {
           ) AS CurrentCategories
         ${baseQuery}
         ORDER BY b.Code ASC
+        LIMIT @limit OFFSET @offset
+      `;
+      params.limit = limit;
+      params.offset = offset;
+
+      const rows = await db.query(dataQuery, params);
+      return res.json({ items: rows, total });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  public static async getReplenishmentReport(req: AuthenticatedRequest, res: Response) {
+    const search = req.query.search as string;
+    const status = req.query.status as string; // 'ALL_ALERTS', 'BELOW_MIN', 'ABOVE_MAX', 'ALL'
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
+    try {
+      let baseQuery = `
+        FROM tblItem item
+        LEFT JOIN (
+            SELECT ItemId, SUM(Quantity) AS TotalStock, SUM(ReservedQty) AS TotalReserved, SUM(Quantity - ReservedQty) AS TotalAvailable
+            FROM tblInventory
+            GROUP BY ItemId
+        ) inv_sum ON item.ItemId = inv_sum.ItemId
+        WHERE 1=1
+      `;
+      const params: any = {};
+
+      if (search) {
+        baseQuery += ` AND (item.Code LIKE @search OR item.Name LIKE @search OR item.Category LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      if (status === 'BELOW_MIN') {
+        baseQuery += ` AND COALESCE(inv_sum.TotalStock, 0) < item.MinStock`;
+      } else if (status === 'ABOVE_MAX') {
+        baseQuery += ` AND COALESCE(inv_sum.TotalStock, 0) > item.MaxStock`;
+      } else if (status === 'ALL_ALERTS' || !status) {
+        baseQuery += ` AND (COALESCE(inv_sum.TotalStock, 0) < item.MinStock OR COALESCE(inv_sum.TotalStock, 0) > item.MaxStock)`;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
+        SELECT 
+            item.ItemId,
+            item.Code AS ItemCode,
+            item.Name AS ItemName,
+            item.Category,
+            item.UOM,
+            item.MinStock,
+            item.MaxStock,
+            item.Weight,
+            item.Volume,
+            COALESCE(inv_sum.TotalStock, 0) AS TotalStock,
+            COALESCE(inv_sum.TotalReserved, 0) AS TotalReserved,
+            COALESCE(inv_sum.TotalAvailable, 0) AS TotalAvailable,
+            CASE 
+                WHEN COALESCE(inv_sum.TotalStock, 0) < item.MinStock THEN 'BELOW_MIN'
+                WHEN COALESCE(inv_sum.TotalStock, 0) > item.MaxStock THEN 'ABOVE_MAX'
+                ELSE 'NORMAL'
+            END AS StockStatus
+        ${baseQuery}
+        ORDER BY (item.MinStock - COALESCE(inv_sum.TotalStock, 0)) DESC, item.ItemId DESC
+        LIMIT @limit OFFSET @offset
+      `;
+      params.limit = limit;
+      params.offset = offset;
+
+      const rows = await db.query(dataQuery, params);
+
+      if (rows.length > 0) {
+        const itemIds = rows.map((r: any) => r.ItemId);
+        
+        const spaceRows = await db.query(`
+          SELECT 
+              item_choice.ItemId,
+              COALESCE(SUM(
+                  FLOOR(LEAST(
+                      (b.CapacityWeight - b.OccupiedWeight) / CASE WHEN COALESCE(item_choice.Weight, 0) > 0 THEN item_choice.Weight ELSE 2.0 END,
+                      (b.CapacityVolume - b.OccupiedVolume) / CASE WHEN COALESCE(item_choice.Volume, 0) > 0 THEN item_choice.Volume ELSE 1.5 END
+                  ))
+              ), 0) AS AvailableStorageSpace
+          FROM tblBin b
+          CROSS JOIN tblItem item_choice
+          WHERE item_choice.ItemId IN (${itemIds.join(',')})
+            AND b.IsActive = 1
+            AND NOT EXISTS (
+                SELECT 1 
+                FROM tblInventory i2 
+                WHERE i2.BinId = b.BinId 
+                  AND i2.ItemId != item_choice.ItemId 
+                  AND i2.Quantity > 0
+            )
+          GROUP BY item_choice.ItemId
+        `);
+
+        const spaceMap = Object.fromEntries(spaceRows.map((s: any) => [s.ItemId, s.AvailableStorageSpace]));
+
+        for (const row of rows) {
+          const space = spaceMap[row.ItemId] || 0;
+          row.AvailableStorageSpace = Math.max(0, space);
+          
+          if (row.StockStatus === 'BELOW_MIN') {
+            const targetQty = Math.max(0, row.MaxStock - row.TotalStock);
+            row.ReorderQty = targetQty;
+            row.FeasibleQty = Math.min(targetQty, row.AvailableStorageSpace);
+          } else {
+            row.ReorderQty = 0;
+            row.FeasibleQty = 0;
+          }
+        }
+      }
+
+      return res.json({ items: rows, total });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  // Get persistent Stock Alert Audit Logs
+  public static async getReplenishmentLogs(req: AuthenticatedRequest, res: Response) {
+    const search = req.query.search as string;
+    const status = req.query.status as string; // 'ALL', 'ACTIVE', 'RESOLVED'
+    const alertType = req.query.alertType as string; // 'ALL', 'BELOW_MIN', 'ABOVE_MAX'
+    const page = parseInt(req.query.page as string || '0');
+    const limit = parseInt(req.query.limit as string || '25');
+    const offset = page * limit;
+
+    try {
+      let baseQuery = `
+        FROM tblStockAlertLog log
+        INNER JOIN tblItem item ON log.ItemId = item.ItemId
+        WHERE 1=1
+      `;
+      const params: any = {};
+
+      if (search) {
+        baseQuery += ` AND (item.Code LIKE @search OR item.Name LIKE @search OR log.ReferenceDoc LIKE @search)`;
+        params.search = `%${search}%`;
+      }
+
+      if (status && status !== 'ALL' && status !== '') {
+        baseQuery += ` AND log.Status = @status`;
+        params.status = status;
+      }
+
+      if (alertType && alertType !== 'ALL' && alertType !== '') {
+        baseQuery += ` AND log.AlertType = @alertType`;
+        params.alertType = alertType;
+      }
+
+      const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;
+      const countResult = await db.query(countQuery, params);
+      const total = countResult[0]?.total || 0;
+
+      const dataQuery = `
+        SELECT 
+            log.AlertLogId,
+            log.ItemId,
+            item.Code AS ItemCode,
+            item.Name AS ItemName,
+            item.Category,
+            item.UOM,
+            log.AlertType,
+            log.CurrentStock,
+            log.ThresholdValue,
+            log.ReferenceDoc,
+            log.Status,
+            log.CreatedAt,
+            log.ResolvedAt
+        ${baseQuery}
+        ORDER BY log.AlertLogId DESC
         LIMIT @limit OFFSET @offset
       `;
       params.limit = limit;

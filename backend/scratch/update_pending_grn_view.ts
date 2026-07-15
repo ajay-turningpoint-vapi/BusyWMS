@@ -7,7 +7,7 @@ async function updateView() {
     await db.connect();
     console.log('Connected to database.');
 
-    console.log('Redefining vw_PendingGRN...');
+    console.log('Re-creating vw_PendingGRN view with robust status and QC-pending filters...');
     await db.query(`
       CREATE OR REPLACE VIEW vw_PendingGRN AS
       SELECT 
@@ -22,22 +22,28 @@ async function updateView() {
           item.Name AS ItemName,
           item.UOM AS ItemUOM,
           pod.OrderQty,
-          COALESCE(grn_sum.TotalGrnQty, 0) AS ReceivedQty,
-          (pod.OrderQty - COALESCE(grn_sum.TotalGrnQty, 0)) AS PendingQty
+          pod.ReceivedQty,
+          (pod.OrderQty - pod.ReceivedQty - COALESCE(pending_grn.TotalPendingQty, 0)) AS PendingQty
       FROM tblPurchaseOrder po
       INNER JOIN tblPurchaseOrderDetail pod ON po.POId = pod.POId
       INNER JOIN tblItem item ON pod.ItemId = item.ItemId
       LEFT JOIN (
-          SELECT gd.ItemId, g.POId, SUM(gd.ReceivedQty) AS TotalGrnQty
+          SELECT gd.ItemId, g.POId, SUM(gd.ReceivedQty) AS TotalPendingQty
           FROM tblGRNDetail gd
           INNER JOIN tblGRN g ON gd.GRNId = g.GRNId
-          WHERE g.Status != 'CANCELLED'
+          WHERE g.Status = 'PENDING'
           GROUP BY gd.ItemId, g.POId
-      ) grn_sum ON po.POId = grn_sum.POId AND pod.ItemId = grn_sum.ItemId
-      WHERE po.Status IN ('PENDING', 'PARTIAL') AND (pod.OrderQty - COALESCE(grn_sum.TotalGrnQty, 0)) > 0;
+      ) pending_grn ON po.POId = pending_grn.POId AND pod.ItemId = pending_grn.ItemId
+      WHERE po.Status IN ('PENDING', 'PARTIAL') 
+        AND (pod.OrderQty - pod.ReceivedQty - COALESCE(pending_grn.TotalPendingQty, 0)) > 0
     `);
 
-    console.log('vw_PendingGRN updated successfully!');
+    console.log('vw_PendingGRN view updated successfully!');
+
+    // Test query for PO 26
+    const test = await db.query('SELECT * FROM vw_PendingGRN WHERE POId = 26');
+    console.log('Test select on vw_PendingGRN for PO 26:', test);
+
     process.exit(0);
   } catch (err: any) {
     console.error('Update failed:', err.message || err);
