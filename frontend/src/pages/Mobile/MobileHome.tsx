@@ -93,7 +93,18 @@ export default function MobileHome() {
   // Packing State
   const [packPickList, setPackPickList] = useState<any>(null);
   const [cartonNo, setCartonNo] = useState('');
+  const [packPalletNo, setPackPalletNo] = useState('');
   const [grossWeight, setGrossWeight] = useState('');
+  const [packNotes, setPackNotes] = useState('');
+  const [packItemCount, setPackItemCount] = useState(0);
+
+  // Dispatch State
+  const [sos, setSOs] = useState<any[]>([]);
+  const [dispatchSelectedSO, setDispatchSelectedSO] = useState<any>(null);
+  const [dispatchChallanNo, setDispatchChallanNo] = useState('');
+  const [dispatchVehicleNo, setDispatchVehicleNo] = useState('');
+  const [dispatchTransporter, setDispatchTransporter] = useState('');
+  const [dispatchLrNumber, setDispatchLrNumber] = useState('');
 
   // ASN Receiving State
   const [asns, setAsns] = useState<any[]>([]);
@@ -114,7 +125,7 @@ export default function MobileHome() {
   const loadMasterData = async () => {
     try {
       setLoading(true);
-      const [itemRes, binRes, poRes, pickRes, ccRes, putRes, invRes, asnRes] = await Promise.all([
+      const results = await Promise.allSettled([
         api.get('/masters/items'),
         api.get('/masters/bins'),
         api.get('/inbound/pending-pos'),
@@ -122,16 +133,23 @@ export default function MobileHome() {
         api.get('/inventory/cycle-counts'),
         api.get('/putaway/pending'),
         api.get('/inventory/stock'),
-        api.get('/inbound/asn')
+        api.get('/inbound/asn'),
+        api.get('/outbound/sales-orders?limit=100')
       ]);
-      setItems(itemRes.data);
-      setBins(binRes.data);
-      setPOs(poRes.data);
-      setAsns((asnRes.data || []).filter((a: any) => ['Confirmed', 'In Transit', 'Partially Received'].includes(a.Status)));
-      setPickLists(pickRes.data.filter((p: any) => p.Status === 'PENDING' || p.Status === 'PICKING'));
-      setCycleCounts(ccRes.data.filter((c: any) => c.Status === 'PENDING' || c.Status === 'COUNTING'));
-      setPendingPutaways(putRes.data);
-      setInventoryList(invRes.data);
+
+      const getValue = (res: any) => res.status === 'fulfilled' ? res.value.data : null;
+
+      setItems(getValue(results[0]) || []);
+      setBins(getValue(results[1]) || []);
+      setPOs(getValue(results[2]) || []);
+      setPickLists(getValue(results[3]) || []);
+      setCycleCounts((getValue(results[4]) || []).filter((c: any) => c.Status === 'PENDING' || c.Status === 'COUNTING'));
+      setPendingPutaways(getValue(results[5]) || []);
+      setInventoryList(getValue(results[6]) || []);
+      setAsns((getValue(results[7]) || []).filter((a: any) => ['Confirmed', 'In Transit', 'Partially Received'].includes(a.Status)));
+      
+      const soData = getValue(results[8]);
+      setSOs(soData ? (soData.items || soData || []) : []);
     } catch (err) {
       console.error(err);
       showFeedback('error', 'Error loading warehouse master tables.');
@@ -144,16 +162,53 @@ export default function MobileHome() {
     loadMasterData();
   }, [screen]);
 
+  const processScannedCodeRef = useRef<any>(null);
+  useEffect(() => {
+    processScannedCodeRef.current = processScannedCode;
+  });
+
   // Handle hardware scanner trigger focusing
   useEffect(() => {
-    if (screen !== 'menu' && screen !== 'print' && !activeCameraScan) {
-      const keepFocus = setInterval(() => {
-        if (hardwareInputRef.current && document.activeElement !== hardwareInputRef.current) {
-          hardwareInputRef.current.focus();
+    if (screen === 'menu' || screen === 'print' || activeCameraScan) return;
+    
+    let barcodeString = '';
+    let lastKeyTime = Date.now();
+    let timeout: any = null;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing inside a regular input field
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        if (document.activeElement !== hardwareInputRef.current) return;
+      }
+      
+      const currentTime = Date.now();
+      if (currentTime - lastKeyTime > 50) {
+        barcodeString = ''; // Reset if typing is too slow
+      }
+      lastKeyTime = currentTime;
+
+      if (e.key === 'Enter') {
+        if (barcodeString.length > 0) {
+          e.preventDefault();
+          const code = barcodeString;
+          barcodeString = '';
+          if (processScannedCodeRef.current) {
+            processScannedCodeRef.current(code);
+          }
         }
-      }, 1000);
-      return () => clearInterval(keepFocus);
-    }
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        barcodeString += e.key;
+      }
+
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => { barcodeString = ''; }, 100);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (timeout) clearTimeout(timeout);
+    };
   }, [screen, activeCameraScan]);
 
   const showFeedback = (type: 'success' | 'error', msg: string) => {
@@ -229,6 +284,10 @@ export default function MobileHome() {
       handleTransferScan(value);
     } else if (screen === 'count') {
       handleCycleCountScan(value);
+    } else if (screen === 'pack') {
+      handlePackScan(value);
+    } else if (screen === 'dispatch') {
+      handleDispatchScan(value);
     }
   };
 
@@ -829,6 +888,96 @@ export default function MobileHome() {
     }
   };
 
+  // 6. PACK LOGIC
+  const selectPackList = async (list: any) => {
+    setPackPickList(list);
+    setCartonNo(`CRT-${Date.now().toString().slice(-4)}`);
+    showFeedback('success', `Pack List ${list.PickCode} loaded.`);
+  };
+
+  const handlePackScan = (code: string) => {
+    if (!packPickList) {
+      const matched = pickLists.find(p => p.PickCode === code && p.Status === 'COMPLETED');
+      if (matched) {
+        selectPackList(matched);
+      } else {
+        showFeedback('error', 'Invalid or pending Pick List barcode.');
+      }
+    } else {
+      showFeedback('success', 'Scanned packing info.');
+    }
+  };
+
+  const submitPack = async () => {
+    if (!packPickList) return;
+    try {
+      setLoading(true);
+      await api.post('/outbound/pack', {
+        pickListId: packPickList.PickListId,
+        cartonNo,
+        palletNo: packPalletNo,
+        grossWeight: Number(grossWeight) || 0,
+        itemCount: packItemCount,
+        notes: packNotes
+      });
+      showFeedback('success', 'Packing completed successfully.');
+      setPackPickList(null);
+      
+      const res = await api.get('/outbound/pick-lists');
+      setPickLists(res.data);
+      setScreen('menu');
+    } catch (err: any) {
+      showFeedback('error', err.response?.data?.message || 'Failed to submit packing.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 7. DISPATCH LOGIC
+  const selectDispatchSO = async (so: any) => {
+    setDispatchSelectedSO(so);
+    setDispatchChallanNo(`CHAL-${so.SOCode}-${Date.now().toString().slice(-4)}`);
+    showFeedback('success', `SO ${so.SOCode} loaded for dispatch.`);
+  };
+
+  const handleDispatchScan = (code: string) => {
+    if (!dispatchSelectedSO) {
+      const matched = sos.find(s => s.SOCode === code && s.Status === 'PACKED');
+      if (matched) {
+        selectDispatchSO(matched);
+      } else {
+        showFeedback('error', 'Invalid or non-packed Sales Order barcode.');
+      }
+    }
+  };
+
+  const submitDispatch = async () => {
+    if (!dispatchSelectedSO || !dispatchChallanNo) {
+      showFeedback('error', 'Challan Number is required.');
+      return;
+    }
+    try {
+      setLoading(true);
+      await api.post('/outbound/dispatch', {
+        soId: dispatchSelectedSO.SOId,
+        deliveryChallanNo: dispatchChallanNo,
+        vehicleNo: dispatchVehicleNo,
+        transporterName: dispatchTransporter,
+        lrNumber: dispatchLrNumber
+      });
+      showFeedback('success', 'Dispatch recorded successfully.');
+      setDispatchSelectedSO(null);
+      
+      const res = await api.get('/outbound/sales-orders?limit=100');
+      setSOs(res.data.items || res.data || []);
+      setScreen('menu');
+    } catch (err: any) {
+      showFeedback('error', err.response?.data?.message || 'Failed to dispatch.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Helper reset functions
   const resetWorkflow = () => {
     setGrnSelectedPO(null);
@@ -853,6 +1002,9 @@ export default function MobileHome() {
     setCcScannedItem(null);
     setCcMatchedDetail(null);
     resetASNWorkflow();
+
+    setPackPickList(null);
+    setDispatchSelectedSO(null);
   };
 
   return (
@@ -1882,6 +2034,220 @@ export default function MobileHome() {
                   <Box sx={{ display: 'flex', gap: 1 }}>
                     <Button variant="outlined" color="error" fullWidth onClick={() => { setSelectedCC(null); setCcScannedBin(null); setCcScannedItem(null); }}>Back</Button>
                     <Button variant="contained" color="success" disabled={!ccScannedItem} fullWidth onClick={confirmCCLine}>Record Count</Button>
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          )}
+
+          {/* ==================================================== */}
+          {/* SCREEN: PACK WORKFLOW                                */}
+          {/* ==================================================== */}
+          {screen === 'pack' && (
+            <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', gap: 1.5 }}>
+              {!packPickList ? (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>Select Pick List to Pack:</Typography>
+                  <TextField
+                    label="Scan Pick List Barcode"
+                    size="small"
+                    fullWidth
+                    value={barcodeInput}
+                    onChange={(e) => setBarcodeInput(e.target.value)}
+                    onKeyDown={(e) => { if(e.key === 'Enter') { handlePackScan(barcodeInput); setBarcodeInput(''); } }}
+                    placeholder="e.g. PICK-123456"
+                    sx={{ mb: 2 }}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton size="small" onClick={() => startCameraScan('pack', handlePackScan)}>
+                            <Camera size={16} />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
+                  />
+                  {pickLists.filter(p => p.Status === 'COMPLETED').length === 0 ? (
+                    <Alert severity="info" sx={{ py: 0 }}>No Pick Lists ready for packing.</Alert>
+                  ) : (
+                    <List sx={{ p: 0 }}>
+                      {pickLists.filter(p => p.Status === 'COMPLETED').map(p => (
+                        <ListItem key={p.PickListId} disablePadding sx={{ mb: 1 }}>
+                          <Button 
+                            fullWidth 
+                            variant="outlined" 
+                            onClick={() => selectPackList(p)}
+                            sx={{ justifyContent: 'space-between', textTransform: 'none', py: 1, color: 'text.primary', borderColor: '#cbd5e1' }}
+                          >
+                            <Box sx={{ textAlign: 'left' }}>
+                              <Typography variant="body2" fontWeight={700}>{p.PickCode}</Typography>
+                              <Typography variant="caption" color="text.secondary">Order: {p.SOCode}</Typography>
+                            </Box>
+                            <Chip label="Pack" size="small" color="primary" />
+                          </Button>
+                        </ListItem>
+                      ))}
+                    </List>
+                  )}
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box sx={{ p: 1, bgcolor: '#fdf4ff', borderRadius: 1.5, border: '1px solid #fbcfe8' }}>
+                    <Typography variant="caption" color="text.secondary">Active Packing List</Typography>
+                    <Typography variant="body2" fontWeight={700}>{packPickList.PickCode} ({packPickList.SOCode})</Typography>
+                  </Box>
+
+                  <TextField
+                    label="Carton No"
+                    size="small"
+                    fullWidth
+                    value={cartonNo}
+                    onChange={(e) => setCartonNo(e.target.value)}
+                  />
+                  
+                  <TextField
+                    label="Pallet No (Optional)"
+                    size="small"
+                    fullWidth
+                    value={packPalletNo}
+                    onChange={(e) => setPackPalletNo(e.target.value)}
+                  />
+
+                  <Grid container spacing={1}>
+                    <Grid item xs={6}>
+                      <TextField
+                        label="Gross Wt (kg)"
+                        type="number"
+                        size="small"
+                        fullWidth
+                        value={grossWeight}
+                        onChange={(e) => setGrossWeight(e.target.value)}
+                      />
+                    </Grid>
+                    <Grid item xs={6}>
+                      <TextField
+                        label="Item Count"
+                        type="number"
+                        size="small"
+                        fullWidth
+                        value={packItemCount}
+                        onChange={(e) => setPackItemCount(Number(e.target.value || '0'))}
+                      />
+                    </Grid>
+                  </Grid>
+                  
+                  <TextField
+                    label="Packing Notes"
+                    size="small"
+                    fullWidth
+                    multiline
+                    rows={2}
+                    value={packNotes}
+                    onChange={(e) => setPackNotes(e.target.value)}
+                  />
+
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                    <Button variant="outlined" color="error" fullWidth onClick={() => setPackPickList(null)}>Back</Button>
+                    <Button variant="contained" color="success" fullWidth onClick={submitPack}>Complete Pack</Button>
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          )}
+
+          {/* ==================================================== */}
+          {/* SCREEN: DISPATCH WORKFLOW                            */}
+          {/* ==================================================== */}
+          {screen === 'dispatch' && (
+            <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', gap: 1.5 }}>
+              {!dispatchSelectedSO ? (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>Select Packed Order to Dispatch:</Typography>
+                  <TextField
+                    label="Scan Sales Order Barcode"
+                    size="small"
+                    fullWidth
+                    value={barcodeInput}
+                    onChange={(e) => setBarcodeInput(e.target.value)}
+                    onKeyDown={(e) => { if(e.key === 'Enter') { handleDispatchScan(barcodeInput); setBarcodeInput(''); } }}
+                    placeholder="e.g. SO-12345"
+                    sx={{ mb: 2 }}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton size="small" onClick={() => startCameraScan('dispatch', handleDispatchScan)}>
+                            <Camera size={16} />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
+                  />
+                  {sos.filter(s => s.Status === 'PACKED').length === 0 ? (
+                    <Alert severity="info" sx={{ py: 0 }}>No Packed Sales Orders waiting for dispatch.</Alert>
+                  ) : (
+                    <List sx={{ p: 0 }}>
+                      {sos.filter(s => s.Status === 'PACKED').map(s => (
+                        <ListItem key={s.SOId} disablePadding sx={{ mb: 1 }}>
+                          <Button 
+                            fullWidth 
+                            variant="outlined" 
+                            onClick={() => selectDispatchSO(s)}
+                            sx={{ justifyContent: 'space-between', textTransform: 'none', py: 1, color: 'text.primary', borderColor: '#cbd5e1' }}
+                          >
+                            <Box sx={{ textAlign: 'left' }}>
+                              <Typography variant="body2" fontWeight={700}>{s.SOCode}</Typography>
+                              <Typography variant="caption" color="text.secondary">Customer: {s.CustomerName}</Typography>
+                            </Box>
+                            <Chip label="Dispatch" size="small" color="primary" />
+                          </Button>
+                        </ListItem>
+                      ))}
+                    </List>
+                  )}
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box sx={{ p: 1, bgcolor: '#f0fdf4', borderRadius: 1.5, border: '1px solid #bbf7d0' }}>
+                    <Typography variant="caption" color="text.secondary">Dispatching Order</Typography>
+                    <Typography variant="body2" fontWeight={700}>{dispatchSelectedSO.SOCode} ({dispatchSelectedSO.CustomerName})</Typography>
+                  </Box>
+
+                  <TextField
+                    label="Delivery Challan No *"
+                    size="small"
+                    fullWidth
+                    required
+                    value={dispatchChallanNo}
+                    onChange={(e) => setDispatchChallanNo(e.target.value)}
+                  />
+                  
+                  <TextField
+                    label="Vehicle No"
+                    size="small"
+                    fullWidth
+                    value={dispatchVehicleNo}
+                    onChange={(e) => setDispatchVehicleNo(e.target.value)}
+                  />
+
+                  <TextField
+                    label="Transporter Name"
+                    size="small"
+                    fullWidth
+                    value={dispatchTransporter}
+                    onChange={(e) => setDispatchTransporter(e.target.value)}
+                  />
+
+                  <TextField
+                    label="LR Number / Tracking No"
+                    size="small"
+                    fullWidth
+                    value={dispatchLrNumber}
+                    onChange={(e) => setDispatchLrNumber(e.target.value)}
+                  />
+
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                    <Button variant="outlined" color="error" fullWidth onClick={() => setDispatchSelectedSO(null)}>Back</Button>
+                    <Button variant="contained" color="success" fullWidth onClick={submitDispatch}>Confirm Dispatch</Button>
                   </Box>
                 </Box>
               )}

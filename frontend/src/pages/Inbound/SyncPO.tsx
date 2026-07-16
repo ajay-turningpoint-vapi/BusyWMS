@@ -385,9 +385,12 @@ export default function SyncPO() {
           value={statusInput}
           onChange={(v) => setStatusInput(v)}
           options={[
+            { value: '', label: 'All Status' },
             { value: 'PENDING', label: 'Pending' },
+            { value: 'GRN_CREATED', label: 'GRN Created (Pending Putaway)' },
             { value: 'PARTIAL', label: 'Partial' },
             { value: 'COMPLETED', label: 'Completed' },
+            { value: 'CANCELLED', label: 'Cancelled' },
           ]}
         />
         <DateRangeFilter
@@ -439,7 +442,7 @@ export default function SyncPO() {
                         <TableCell>
                           <Chip 
                             label={po.Status} 
-                            color={po.Status === 'PENDING' ? 'info' : (po.Status === 'COMPLETED' ? 'success' : 'warning')} 
+                            color={po.Status === 'PENDING' ? 'info' : (po.Status === 'COMPLETED' ? 'success' : (po.Status === 'GRN_CREATED' ? 'primary' : 'warning'))} 
                             size="small" 
                             sx={{ fontWeight: 600 }} 
                           />
