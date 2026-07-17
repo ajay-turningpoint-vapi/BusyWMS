@@ -16,11 +16,11 @@ interface User {
 }
 
 interface AuthState {
-  token: string | null;
+  token: string | null; // Kept for backward compatibility but unused
   user: User | null;
   isAuthenticated: boolean;
   themeMode: 'light' | 'dark';
-  setAuth: (token: string, user: User) => void;
+  setAuth: (token: string, user: User) => void; // Token argument ignored
   logout: () => void;
   toggleTheme: () => void;
   setWarehouseId: (warehouseId: number | null) => void;
@@ -28,39 +28,37 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => {
   // Read initial values from localStorage
-  const savedToken = localStorage.getItem('wms_token');
   const savedUser = localStorage.getItem('wms_user');
   const savedTheme = localStorage.getItem('wms_theme') as 'light' | 'dark' || 'light';
 
   return {
-    token: savedToken,
+    token: null, // Tokens are in HTTP-Only cookies now
     user: savedUser ? JSON.parse(savedUser) : null,
-    isAuthenticated: !!savedToken,
+    isAuthenticated: !!savedUser, // Rely on user profile existence
     themeMode: savedTheme,
     
     setAuth: (token, user) => {
-      localStorage.setItem('wms_token', token);
+      // We don't save token anymore
       localStorage.setItem('wms_user', JSON.stringify(user));
-      set({ token, user, isAuthenticated: true });
+      set({ token: null, user, isAuthenticated: true });
     },
     
     logout: () => {
-      localStorage.removeItem('wms_token');
       localStorage.removeItem('wms_user');
       set({ token: null, user: null, isAuthenticated: false });
     },
-
+    
     toggleTheme: () => {
       set((state) => {
-        const nextMode = state.themeMode === 'light' ? 'dark' : 'light';
-        localStorage.setItem('wms_theme', nextMode);
-        return { themeMode: nextMode };
+        const newMode = state.themeMode === 'light' ? 'dark' : 'light';
+        localStorage.setItem('wms_theme', newMode);
+        return { themeMode: newMode };
       });
     },
 
     setWarehouseId: (warehouseId) => {
       set((state) => {
-        if (!state.user) return {};
+        if (!state.user) return state;
         const updatedUser = { ...state.user, warehouseId: warehouseId || undefined };
         localStorage.setItem('wms_user', JSON.stringify(updatedUser));
         return { user: updatedUser };

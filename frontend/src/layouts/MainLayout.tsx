@@ -133,24 +133,43 @@ export default function MainLayout() {
   // Phase 5 will connect this via Socket.IO for real-time server-push alerts
   const [notifications, setNotifications] = useState<{id: number; text: string; time: string}[]>([]);
 
-  const fetchNotifications = async () => {
-    try {
-      const res = await api.get('/notifications');
-      const formatted = res.data.filter((n: any) => n.IsRead === 0).map((n: any) => ({
-        id: n.NotificationId,
-        text: `${n.Title}: ${n.Message}`,
-        time: new Date(n.CreatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }));
-      setNotifications(formatted);
-    } catch (err) {
-      console.error('Failed to load notifications', err);
-    }
-  };
-
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    let isMounted = true;
+
+    const fetchNotifications = async () => {
+      try {
+        const res = await api.get('/notifications');
+        if (!isMounted) return;
+        
+        const formatted = res.data.filter((n: any) => n.IsRead === 0).map((n: any) => ({
+          id: n.NotificationId,
+          text: `${n.Title}: ${n.Message}`,
+          time: new Date(n.CreatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }));
+        setNotifications(formatted);
+        
+        // Schedule next poll on success
+        timeoutId = setTimeout(fetchNotifications, 10000);
+      } catch (err: any) {
+        if (!isMounted) return;
+        console.error('Failed to load notifications', err);
+        
+        // If 401 or 403, stop polling. Otherwise, backoff to 30s.
+        if (err.response && (err.response.status === 403 || err.response.status === 401)) {
+          console.warn("Stopping notification polling due to auth/permission error.");
+        } else {
+          timeoutId = setTimeout(fetchNotifications, 30000);
+        }
+      }
+    };
+
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 10000);
-    return () => clearInterval(interval);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   const handleNotiClick = async (id: number, text: string) => {

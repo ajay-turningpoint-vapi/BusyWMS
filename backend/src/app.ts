@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import http from 'http';
 import { Server } from 'socket.io';
 import swaggerUi from 'swagger-ui-express';
+import cookieParser from 'cookie-parser';
 import db from './config/db';
 import mssqlDb from './config/mssql';
 
@@ -46,10 +47,12 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*', // Set CORS_ORIGIN env var in production to whitelist specific frontend URLs
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
 app.use(express.json({ limit: '2mb' })); // Security: body size limit prevents payload bombs
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+app.use(cookieParser());
 
 // Socket.io connection logging
 io.on('connection', (socket) => {
@@ -75,8 +78,10 @@ app.use((req: any, res, next) => {
 // API ROUTES
 // ==========================================
 
-// Authentication
+// Auth Routes
 app.post('/api/auth/login', AuthController.login);
+app.post('/api/auth/refresh', AuthController.refresh);
+app.post('/api/auth/logout', AuthController.logout);
 // BUG-013 FIX: Register is now protected — only Admins can create new users
 app.post('/api/auth/register', authenticateJWT, requireRoles(['Admin']), AuthController.register);
 app.get('/api/auth/profile', authenticateJWT, AuthController.getProfile);

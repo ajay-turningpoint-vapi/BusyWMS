@@ -350,6 +350,35 @@ export const swaggerDocument = {
         }
       }
     },
+    '/auth/refresh': {
+      post: {
+        tags: ['Authentication'],
+        summary: 'Refresh Access Token',
+        description: 'Reads the HttpOnly refresh cookie and issues a new access token if valid.',
+        security: [],
+        responses: {
+          200: {
+            description: 'Successfully refreshed token.'
+          },
+          401: {
+            description: 'Invalid or expired refresh token.'
+          }
+        }
+      }
+    },
+    '/auth/logout': {
+      post: {
+        tags: ['Authentication'],
+        summary: 'Logout',
+        description: 'Revokes the refresh token and clears all authentication cookies.',
+        security: [],
+        responses: {
+          200: {
+            description: 'Successfully logged out.'
+          }
+        }
+      }
+    },
     '/masters/suppliers': {
       get: {
         tags: ['Masters'],
@@ -822,6 +851,57 @@ export const swaggerDocument = {
                     message: { type: 'string' },
                     count: { type: 'integer' }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/reports/created-grns': {
+      get: {
+        tags: ['Reports'],
+        summary: 'Get Created GRNs Report',
+        description: 'Returns a paginated list of created GRNs with optional filters for search, dates, and status.',
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer' }, description: 'Page number (0-indexed)' },
+          { name: 'limit', in: 'query', schema: { type: 'integer' }, description: 'Number of items per page' },
+          { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Search term for GRN code, PO code, etc.' },
+          { name: 'startDate', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Start date (YYYY-MM-DD)' },
+          { name: 'endDate', in: 'query', schema: { type: 'string', format: 'date' }, description: 'End date (YYYY-MM-DD)' },
+          { name: 'status', in: 'query', schema: { type: 'string' }, description: 'Filter by GRN status (e.g. PENDING, QC_COMPLETED)' }
+        ],
+        responses: {
+          200: {
+            description: 'Paginated list of GRNs',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { type: 'object' } },
+                    total: { type: 'integer' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/putaway/pending': {
+      get: {
+        tags: ['Putaway'],
+        summary: 'Get Pending Putaways',
+        description: 'Returns a list of items from received GRNs that are waiting to be slotted into warehouse bins.',
+        responses: {
+          200: {
+            description: 'List of pending putaway items',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: { type: 'object' }
                 }
               }
             }

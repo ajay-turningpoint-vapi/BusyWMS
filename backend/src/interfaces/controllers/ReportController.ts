@@ -1124,6 +1124,7 @@ export class ReportController {
     const search = req.query.search as string;
     const startDate = req.query.startDate as string;
     const endDate = req.query.endDate as string;
+    const status = req.query.status as string;
     
     const page = parseInt(req.query.page as string || '0');
     const limit = parseInt(req.query.limit as string || '25');
@@ -1151,6 +1152,11 @@ export class ReportController {
       if (search) {
         baseQuery += ` AND (g.GRNCode LIKE @search OR po.POCode LIKE @search OR g.InvoiceNo LIKE @search OR u.FullName LIKE @search)`;
         params.search = `%${search}%`;
+      }
+
+      if (status) {
+        baseQuery += ` AND g.Status = @status`;
+        params.status = status;
       }
 
       const countQuery = `SELECT COUNT(*) AS total ${baseQuery}`;

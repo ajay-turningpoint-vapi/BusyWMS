@@ -507,6 +507,10 @@ export default function MobileHome() {
       showFeedback('error', 'No items scanned.');
       return;
     }
+    if (!grnInvoiceNo || grnInvoiceNo.trim() === '') {
+      showFeedback('error', 'Supplier Invoice Number is required.');
+      return;
+    }
     try {
       setLoading(true);
       await api.post('/inbound/grn', {
@@ -1342,6 +1346,8 @@ export default function MobileHome() {
 
                       <TextField
                         label="Supplier Invoice Number"
+                        required
+                        error={!grnInvoiceNo}
                         size="small"
                         fullWidth
                         sx={{ mt: 1.5, mb: 1 }}

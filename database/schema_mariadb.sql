@@ -683,6 +683,16 @@ CREATE TABLE tblLoginHistory (
     FailureReason VARCHAR(255) DEFAULT NULL
 ) ENGINE=InnoDB;
 
+CREATE TABLE tblRefreshToken (
+    TokenId INT AUTO_INCREMENT PRIMARY KEY,
+    UserId INT NOT NULL,
+    Token VARCHAR(512) NOT NULL UNIQUE,
+    ExpiresAt DATETIME NOT NULL,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    Revoked TINYINT(1) DEFAULT 0 NOT NULL,
+    FOREIGN KEY (UserId) REFERENCES tblUser(UserId) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE tblNotification (
     NotificationId INT AUTO_INCREMENT PRIMARY KEY,
     UserId INT DEFAULT NULL, -- Null means broadcast to all eligible operators

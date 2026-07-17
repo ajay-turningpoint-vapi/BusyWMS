@@ -45,6 +45,10 @@ export class GrnController {
     const { poId, invoiceNo, items } = req.body;
     const userId = req.user?.userId || 1;
 
+    if (!invoiceNo || invoiceNo.trim() === '') {
+      return res.status(400).json({ message: 'Supplier Invoice Reference is mandatory' });
+    }
+
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: 'Items list is required' });
     }

@@ -433,6 +433,8 @@ export default function GRN() {
           <Grid item xs={12} md={6}>
             <TextField
               label="Supplier Invoice Reference"
+              required
+              error={!invoiceNo}
               size="small"
               fullWidth
               value={invoiceNo}

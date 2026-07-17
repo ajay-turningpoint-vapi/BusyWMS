@@ -1,11 +1,12 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { db } from '../../config/db';
 import { AuthenticatedRequest } from '../middlewares/auth';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'busywms-secret-key-12345';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '2h';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m'; // Access token is short-lived
 
 export class AuthController {
   
@@ -49,7 +50,7 @@ export class AuthController {
         return res.status(401).json({ message: 'Invalid username or password' });
       }
 
-      // Generate JWT Token with roleId
+      // Generate JWT Access Token
       const token = jwt.sign(
         { 
           userId: user.UserId, 
@@ -61,6 +62,16 @@ export class AuthController {
         JWT_SECRET,
         { expiresIn: JWT_EXPIRES_IN as any }
       );
+
+      // Generate Refresh Token
+      const refreshToken = crypto.randomBytes(64).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
+
+      await db.executeCmd(`
+        INSERT INTO tblRefreshToken (UserId, Token, ExpiresAt, Revoked)
+        VALUES (@userId, @token, @expiresAt, 0)
+      `, { userId: user.UserId, token: refreshToken, expiresAt });
 
       // Audit Log Login
       await db.executeCmd(`
@@ -85,8 +96,23 @@ export class AuthController {
         WHERE RoleId = @roleId
       `, { roleId: user.RoleId });
 
+      // Set cookies
+      res.cookie('access_token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 15 * 60 * 1000 // 15 mins
+      });
+
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
       return res.json({
-        token,
+        message: 'Logged in successfully',
         user: {
           userId: user.UserId,
           username: user.Username,
@@ -98,6 +124,91 @@ export class AuthController {
       });
     } catch (err: any) {
       console.error('Login error:', err);
+      return res.status(500).json({ message: 'Internal server error', error: err.message });
+    }
+  }
+
+  public static async refresh(req: Request, res: Response) {
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (!refreshToken) {
+      return res.status(401).json({ message: 'No refresh token provided' });
+    }
+
+    try {
+      // Find the token in the database
+      const rows = await db.query(`
+        SELECT r.TokenId, r.UserId, r.ExpiresAt, r.Revoked,
+               u.Username, u.FullName, u.WarehouseId, u.IsActive, u.RoleId, role.RoleName
+        FROM tblRefreshToken r
+        INNER JOIN tblUser u ON r.UserId = u.UserId
+        INNER JOIN tblRole role ON u.RoleId = role.RoleId
+        WHERE r.Token = @token
+      `, { token: refreshToken });
+
+      if (rows.length === 0) {
+        return res.status(401).json({ message: 'Invalid refresh token' });
+      }
+
+      const tokenRecord = rows[0];
+
+      if (tokenRecord.Revoked) {
+        return res.status(401).json({ message: 'Refresh token is revoked' });
+      }
+
+      if (new Date() > new Date(tokenRecord.ExpiresAt)) {
+        return res.status(401).json({ message: 'Refresh token has expired' });
+      }
+
+      if (!tokenRecord.IsActive) {
+        return res.status(403).json({ message: 'User account is inactive' });
+      }
+
+      // Valid refresh token -> issue new access token
+      const token = jwt.sign(
+        { 
+          userId: tokenRecord.UserId, 
+          username: tokenRecord.Username, 
+          role: tokenRecord.RoleName, 
+          roleId: tokenRecord.RoleId,
+          warehouseId: tokenRecord.WarehouseId 
+        },
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN as any }
+      );
+
+      res.cookie('access_token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 15 * 60 * 1000 // 15 mins
+      });
+
+      return res.json({ message: 'Token refreshed successfully' });
+    } catch (err: any) {
+      console.error('Refresh token error:', err);
+      return res.status(500).json({ message: 'Internal server error', error: err.message });
+    }
+  }
+
+  public static async logout(req: Request, res: Response) {
+    const refreshToken = req.cookies?.refresh_token;
+
+    try {
+      if (refreshToken) {
+        await db.executeCmd(`
+          UPDATE tblRefreshToken
+          SET Revoked = 1
+          WHERE Token = @token
+        `, { token: refreshToken });
+      }
+
+      res.clearCookie('access_token');
+      res.clearCookie('refresh_token');
+
+      return res.json({ message: 'Logged out successfully' });
+    } catch (err: any) {
+      console.error('Logout error:', err);
       return res.status(500).json({ message: 'Internal server error', error: err.message });
     }
   }
