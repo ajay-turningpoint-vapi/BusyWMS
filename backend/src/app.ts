@@ -5,6 +5,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import swaggerUi from 'swagger-ui-express';
 import cookieParser from 'cookie-parser';
+import morgan from 'morgan';
 import db from './config/db';
 import mssqlDb from './config/mssql';
 
@@ -54,6 +55,18 @@ app.use(cors({
 app.use(express.json({ limit: '2mb' })); // Security: body size limit prevents payload bombs
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(cookieParser());
+
+// Request logging
+const morganFormat = process.env.NODE_ENV === 'production' ? 'combined' : 'dev';
+app.use(
+  morgan(morganFormat, {
+    stream: {
+      write: (message) => {
+        logger.info(message.trim());
+      },
+    },
+  })
+);
 
 // Socket.io connection logging
 io.on('connection', (socket) => {

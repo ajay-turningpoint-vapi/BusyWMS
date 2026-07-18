@@ -1,5 +1,6 @@
 import mssql from 'mssql';
 import dotenv from 'dotenv';
+import logger from '../utils/logger';
 dotenv.config();
 
 const rawServer = process.env.DB_SERVER || '0.0.0.0';
@@ -43,12 +44,12 @@ export class MssqlConnection {
 
   public async connect(): Promise<mssql.ConnectionPool> {
     try {
-      console.log(`Connecting to MSSQL at ${server}${port ? ':' + port : ''}...`);
+      logger.info(`Connecting to MSSQL at ${server}${port ? ':' + port : ''}...`);
       this.pool = await new mssql.ConnectionPool(config).connect();
-      console.log('MSSQL Connected successfully.');
+      logger.info('MSSQL Connected successfully.');
       return this.pool;
     } catch (err: any) {
-      console.error('MSSQL Connection failed:', err.message || err);
+      logger.error('MSSQL Connection failed:', err.message || err);
       throw err;
     }
   }

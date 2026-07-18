@@ -1,5 +1,6 @@
 import winston from 'winston';
 import 'winston-daily-rotate-file';
+import util from 'util';
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
@@ -41,5 +42,12 @@ const logger = winston.createLogger({
     }),
   ],
 });
+
+// Override global console to use Winston
+console.log = (...args: any[]) => logger.info(util.format(...args));
+console.info = (...args: any[]) => logger.info(util.format(...args));
+console.warn = (...args: any[]) => logger.warn(util.format(...args));
+console.error = (...args: any[]) => logger.error(util.format(...args));
+console.debug = (...args: any[]) => logger.debug(util.format(...args));
 
 export default logger;

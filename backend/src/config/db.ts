@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise';
+import logger from '../utils/logger';
 
 export type DbType = 'MARIADB';
 
@@ -26,14 +27,14 @@ class DatabaseConnection {
         },
         enableKeepAlive: true
       };
-      console.log(`Connecting to MariaDB at ${config.host}:${config.port}...`);
+      logger.info(`Connecting to MariaDB at ${config.host}:${config.port}...`);
       this.mariadbPool = mysql.createPool(config);
       // Test connection
       const conn = await this.mariadbPool.getConnection();
-      console.log('MariaDB Connected successfully.');
+      logger.info('MariaDB Connected successfully.');
       conn.release();
     } catch (err) {
-      console.error('MariaDB Connection failed.', err);
+      logger.error('MariaDB Connection failed.', err);
       throw err;
     }
   }
