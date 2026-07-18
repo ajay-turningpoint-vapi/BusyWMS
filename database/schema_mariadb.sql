@@ -1153,8 +1153,10 @@ BEGIN
 
         IF v_TotalReceived >= v_TotalOrdered THEN
             UPDATE tblPurchaseOrder SET Status = 'COMPLETED', UpdatedAt = NOW() WHERE POId = v_POId;
-        ELSE
+        ELSEIF v_TotalReceived > 0 THEN
             UPDATE tblPurchaseOrder SET Status = 'PARTIAL', UpdatedAt = NOW() WHERE POId = v_POId;
+        ELSE
+            UPDATE tblPurchaseOrder SET Status = 'PENDING', UpdatedAt = NOW() WHERE POId = v_POId;
         END IF;
     END IF;
 

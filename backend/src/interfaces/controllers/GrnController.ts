@@ -235,22 +235,30 @@ export class GrnController {
           WHERE pod.POId = @poId
         `, { poId });
 
-        // Determine if there is any remaining quantity after this GRN
         let isPartial = false;
+        let totalReceivedAfterGrn = 0;
+        
         for (const poItem of poItems) {
           const currentGrnItem = validItems.find((vi: any) => vi.itemId === poItem.ItemId);
           const newGrnQty = currentGrnItem ? parseFloat(currentGrnItem.receivedQty || 0) : 0;
           const orderQty = parseFloat(poItem.OrderQty || 0);
           const totalGrnQty = parseFloat(poItem.TotalGrnQty || 0);
+          
+          totalReceivedAfterGrn += (totalGrnQty + newGrnQty);
           const remaining = orderQty - (totalGrnQty + newGrnQty);
+          
           // Due to floating point imprecision, use a small epsilon
           if (remaining > 0.001) {
             isPartial = true;
-            break;
           }
         }
 
-        const newStatus = isPartial ? 'PARTIAL' : 'COMPLETED';
+        let newStatus = 'PENDING';
+        if (!isPartial) {
+          newStatus = 'COMPLETED';
+        } else if (totalReceivedAfterGrn > 0) {
+          newStatus = 'PARTIAL';
+        }
 
         await db.executeCmd(`
           UPDATE tblPurchaseOrder SET Status = @newStatus, UpdatedAt = CURRENT_TIMESTAMP WHERE POId = @poId
