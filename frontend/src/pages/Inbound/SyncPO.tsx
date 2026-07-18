@@ -82,6 +82,7 @@ export default function SyncPO() {
   
   // Lookups
   const [itemsList, setItemsList] = useState<any[]>([]);
+  const [itemSearchText, setItemSearchText] = useState('');
   const [suppliersList, setSuppliersList] = useState<any[]>([]);
   
   // Form State
@@ -126,8 +127,6 @@ export default function SyncPO() {
 
   const loadLookups = async () => {
     try {
-      const itemsRes = await api.get('/masters/items');
-      setItemsList(itemsRes.data);
       const suppliersRes = await api.get('/masters/suppliers');
       setSuppliersList(suppliersRes.data);
     } catch (err) {
@@ -138,6 +137,27 @@ export default function SyncPO() {
   useEffect(() => {
     loadLookups();
   }, []);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const res = await api.get(`/masters/items?page=0&limit=50&lightweight=true&search=${encodeURIComponent(itemSearchText)}`);
+        setItemsList(prev => {
+          const map = new Map();
+          prev.forEach(i => map.set(i.ItemId, i));
+          if (res.data && res.data.items) {
+            res.data.items.forEach((i: any) => map.set(i.ItemId, i));
+          }
+          return Array.from(map.values());
+        });
+      } catch (err) {
+        console.error('Failed to search items', err);
+      }
+    };
+    
+    const timeout = setTimeout(fetchItems, 300);
+    return () => clearTimeout(timeout);
+  }, [itemSearchText]);
 
   useEffect(() => {
     loadData();
@@ -682,6 +702,7 @@ export default function SyncPO() {
                             getOptionLabel={(option) => `${option.Name} (${option.Code})`}
                             value={itemsList.find(i => i.ItemId === line.itemId) || null}
                             onChange={(e, newVal) => handleLineChange(idx, 'itemId', newVal?.ItemId || '')}
+                            onInputChange={(e, newInputValue) => setItemSearchText(newInputValue)}
                             renderInput={(params) => <TextField {...params} variant="standard" placeholder="Choose item" />}
                             disableClearable
                           />

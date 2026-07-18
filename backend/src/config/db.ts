@@ -12,7 +12,7 @@ class DatabaseConnection {
 
   public async connect(): Promise<void> {
     try {
-      const config = {
+      const config: any = {
         host: process.env.MARIADB_HOST || 'localhost',
         port: parseInt(process.env.MARIADB_PORT || '3306'),
         user: process.env.MARIADB_USER || 'root',
@@ -20,7 +20,11 @@ class DatabaseConnection {
         database: process.env.MARIADB_DATABASE || 'BusyWMS',
         waitForConnections: true,
         connectionLimit: 10,
-        queueLimit: 0
+        queueLimit: 0,
+        authPlugins: {
+          mysql_native_password: () => () => process.env.MARIADB_PASSWORD || 'Password123!'
+        },
+        enableKeepAlive: true
       };
       console.log(`Connecting to MariaDB at ${config.host}:${config.port}...`);
       this.mariadbPool = mysql.createPool(config);

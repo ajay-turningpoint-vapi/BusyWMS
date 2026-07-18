@@ -27,6 +27,7 @@ import { ASNController } from './interfaces/controllers/ASNController';
 import { ReturnsController } from './interfaces/controllers/ReturnsController';
 import { syncScheduler } from './services/SyncScheduler';
 import { swaggerDocument } from './swagger';
+import logger from './utils/logger';
 
 // Middlewares
 import { authenticateJWT, requireRoles, requireFeature, requirePermission } from './interfaces/middlewares/auth';
@@ -56,15 +57,15 @@ app.use(cookieParser());
 
 // Socket.io connection logging
 io.on('connection', (socket) => {
-  console.log(`Socket client connected: ${socket.id}`);
+  logger.info(`Socket client connected: ${socket.id}`);
   
   socket.on('join_warehouse', (warehouseId) => {
     socket.join(`warehouse_${warehouseId}`);
-    console.log(`Socket ${socket.id} joined warehouse_${warehouseId}`);
+    logger.info(`Socket ${socket.id} joined warehouse_${warehouseId}`);
   });
 
   socket.on('disconnect', () => {
-    console.log(`Socket client disconnected: ${socket.id}`);
+    logger.info(`Socket client disconnected: ${socket.id}`);
   });
 });
 
@@ -285,7 +286,7 @@ app.get('/api-docs-json', (req, res) => {
 
 // Global Error Handler
 app.use((err: any, req: any, res: any, next: any) => {
-  console.error('Unhandled error:', err);
+  logger.error('Unhandled error:', err);
   res.status(500).json({ message: 'Internal server error', error: err.message });
 });
 
@@ -307,17 +308,17 @@ function checkErpConnection() {
       data += chunk;
     });
     res.on('end', () => {
-      console.log('Connected to ERP successfully.');
+      logger.info('Connected to ERP successfully.');
     });
   });
 
   req.on('timeout', () => {
     req.destroy();
-    console.log('Warning: Cannot connect to ERP system (Timeout).');
+    logger.warn('Warning: Cannot connect to ERP system (Timeout).');
   });
 
   req.on('error', (err: any) => {
-    console.log('Warning: Cannot connect to ERP system.');
+    logger.warn('Warning: Cannot connect to ERP system.', err);
   });
 
   req.end();
@@ -329,7 +330,7 @@ db.connect().then(async () => {
   try {
     await mssqlDb.connect();
   } catch (err: any) {
-    console.error('Warning: MSSQL Database connection could not be established on startup.');
+    logger.error('Warning: MSSQL Database connection could not be established on startup.', err);
   }
 
   // Start Background Sync Scheduler
@@ -339,9 +340,9 @@ db.connect().then(async () => {
   checkErpConnection();
 
   server.listen(PORT, () => {
-    console.log(`BusyWMS API running on port ${PORT}`);
-    console.log(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
+    logger.info(`BusyWMS API running on port ${PORT}`);
+    logger.info(`Swagger documentation available at http://localhost:${PORT}/api-docs`);
   });
 }).catch(err => {
-  console.error('Failed to initialize database connection:', err);
+  logger.error('Failed to initialize database connection:', err);
 });

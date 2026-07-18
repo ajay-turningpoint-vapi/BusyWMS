@@ -24,6 +24,7 @@ export default function CreateEditASN() {
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [itemsList, setItemsList] = useState<any[]>([]);
+  const [itemSearchText, setItemSearchText] = useState('');
 
   // Header State
   const [supplierId, setSupplierId] = useState<number | string>('');
@@ -44,20 +45,39 @@ export default function CreateEditASN() {
 
   const loadLookups = async () => {
     try {
-      const [supRes, whRes, poRes, itemsRes] = await Promise.all([
+      const [supRes, whRes, poRes] = await Promise.all([
         api.get('/masters/suppliers'),
         api.get('/masters/warehouses'),
-        api.get('/inbound/purchase-orders'),
-        api.get('/masters/items')
+        api.get('/inbound/purchase-orders')
       ]);
       setSuppliers(supRes.data);
       setWarehouses(whRes.data);
       setPurchaseOrders(poRes.data);
-      setItemsList(itemsRes.data);
     } catch (err) {
       console.error('Failed to load lookup data', err);
     }
   };
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const res = await api.get(`/masters/items?page=0&limit=50&lightweight=true&search=${encodeURIComponent(itemSearchText)}`);
+        setItemsList(prev => {
+          const map = new Map();
+          prev.forEach(i => map.set(i.ItemId, i));
+          if (res.data && res.data.items) {
+            res.data.items.forEach((i: any) => map.set(i.ItemId, i));
+          }
+          return Array.from(map.values());
+        });
+      } catch (err) {
+        console.error('Failed to search items', err);
+      }
+    };
+    
+    const timeout = setTimeout(fetchItems, 300);
+    return () => clearTimeout(timeout);
+  }, [itemSearchText]);
 
   const loadASNDetails = async () => {
     if (!id) return;
@@ -445,6 +465,7 @@ export default function CreateEditASN() {
                               onChange={(_, newValue) => {
                                 handleLineChange(idx, 'itemId', newValue ? newValue.ItemId : '');
                               }}
+                              onInputChange={(e, newInputValue) => setItemSearchText(newInputValue)}
                               renderInput={(params) => (
                                 <TextField {...params} placeholder="Search Item..." variant="outlined" size="small" />
                               )}

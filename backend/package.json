@@ -20,7 +20,9 @@
     "mssql": "^12.6.0",
     "mysql2": "^3.22.5",
     "socket.io": "^4.7.5",
-    "swagger-ui-express": "^5.0.0"
+    "swagger-ui-express": "^5.0.0",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
