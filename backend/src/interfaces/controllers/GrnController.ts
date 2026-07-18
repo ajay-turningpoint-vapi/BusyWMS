@@ -85,11 +85,20 @@ export class GrnController {
       // 2. Fetch PO & Item details to construct XML payload
       let poCode = '';
       let vendorName = '';
+      let supplierDetails: any = null;
       if (poId) {
-        const poRows = await db.query('SELECT POCode, VendorName, Status FROM tblPurchaseOrder WHERE POId = @poId', { poId });
+        const poRows = await db.query('SELECT POCode, VendorName, VendorCode, Status FROM tblPurchaseOrder WHERE POId = @poId', { poId });
         if (poRows.length > 0) {
           poCode = poRows[0].POCode || '';
           vendorName = poRows[0].VendorName || '';
+          const vendorCode = poRows[0].VendorCode || '';
+          
+          if (vendorCode) {
+            const suppRows = await db.query('SELECT * FROM tblSupplier WHERE Code = @vendorCode', { vendorCode });
+            if (suppRows.length > 0) {
+              supplierDetails = suppRows[0];
+            }
+          }
           
           if (poRows[0].Status === 'PARTIAL') {
             const syncedCount = await db.query('SELECT COUNT(*) as count FROM tblGRN WHERE POId = @poId AND IsSynced = 1', { poId });
@@ -103,7 +112,7 @@ export class GrnController {
 
       const itemsWithDetails: any[] = [];
       for (const item of validItems) {
-        const itemRows = await db.query('SELECT Name, UOM FROM tblItem WHERE ItemId = @itemId', { itemId: item.itemId });
+        const itemRows = await db.query('SELECT Name, UOM, HSNCode, MRP, AltUnit, PurchPrice, MainUnit FROM tblItem WHERE ItemId = @itemId', { itemId: item.itemId });
         const podRows = poId ? await db.query('SELECT UnitPrice FROM tblPurchaseOrderDetail WHERE POId = @poId AND ItemId = @itemId', { poId, itemId: item.itemId }) : [];
         const itemName = itemRows.length > 0 ? itemRows[0].Name : '';
         const itemUom = itemRows.length > 0 ? itemRows[0].UOM : 'SQFT';
@@ -112,7 +121,11 @@ export class GrnController {
           ...item,
           itemName,
           itemUom,
-          unitPrice
+          unitPrice,
+          hsnCode: itemRows.length > 0 ? (itemRows[0].HSNCode || '') : '',
+          mrp: itemRows.length > 0 ? (itemRows[0].MRP || 0) : 0,
+          mainUnit: itemRows.length > 0 ? (itemRows[0].MainUnit || '') : '',
+          altUnit: itemRows.length > 0 ? (itemRows[0].AltUnit || '') : ''
         });
       }
 
@@ -127,30 +140,57 @@ export class GrnController {
 
       let itemDetailsXml = '';
       itemsWithDetails.forEach((item, index) => {
+        const amt = (parseFloat(item.receivedQty) * parseFloat(item.unitPrice || 0)).toFixed(2);
         itemDetailsXml += `<ItemDetail>` +
-          `<Date>${dateStr}</Date>` +
-          `<VchType>4</VchType>` +
-          `<VchNo>${poCode}</VchNo>` +
           `<SrNo>${index + 1}</SrNo>` +
           `<ItemName>${item.itemName}</ItemName>` +
-          `<UnitName>${item.itemUom || 'SQFT'}</UnitName>` +
-          `<AltUnitName>${item.itemUom || 'SQFT'}</AltUnitName>` +
+          `<UnitName>${item.mainUnit || item.itemUom || 'SQFT'}</UnitName>` +
+          `<AltUnitName>${item.altUnit || ''}</AltUnitName>` +
           `<Qty>${item.receivedQty}</Qty>` +
+          `<QtyMainUnit>${item.receivedQty}</QtyMainUnit>` +
+          `<QtyAltUnit>${item.receivedQty}</QtyAltUnit>` +
+          `<ItemHSNCode>${item.hsnCode || ''}</ItemHSNCode>` +
+          `<Price>${item.unitPrice || 0}</Price>` +
+          `<PriceAltUnit>${item.unitPrice || 0}</PriceAltUnit>` +
           `<ListPrice>${item.unitPrice || 0}</ListPrice>` +
+          `<Amt>${amt}</Amt>` +
+          `<ItemMRP>${item.mrp || 0}</ItemMRP>` +
           `</ItemDetail>`;
       });
 
-      const xmlStr = `<MaterialReceipt>` +
-        `<VchSeriesName>TP</VchSeriesName>` +
+      let billingDetailsXml = '';
+      if (supplierDetails) {
+        let itpan = '';
+        if (supplierDetails.GSTIN && supplierDetails.GSTIN.length >= 12) {
+          itpan = supplierDetails.GSTIN.substring(2, 12);
+        }
+        billingDetailsXml = `<BillingDetails>` +
+          `<PartyName>${supplierDetails.Name || ''}</PartyName>` +
+          `<Address1>${supplierDetails.Add1 || ''}</Address1>` +
+          `<Address2>${supplierDetails.Add2 || ''}</Address2>` +
+          `<Address3>${supplierDetails.Add3 || ''}</Address3>` +
+          `<Address4>${supplierDetails.Add4 || ''}</Address4>` +
+          `<MobileNo>${supplierDetails.Mobile || ''}</MobileNo>` +
+          `<Email>${supplierDetails.Email || ''}</Email>` +
+          `<ITPAN>${itpan}</ITPAN>` +
+          `<GSTNo>${supplierDetails.GSTIN || ''}</GSTNo>` +
+          `</BillingDetails>`;
+      }
+
+      const xmlStr = `<Purchase>` +
+        `<VchSeriesName>TP_TAX</VchSeriesName>` +
         `<Date>${dateStr}</Date>` +
-        `<VchType>4</VchType>` +
-        `<TranType>3</TranType>` +
-        `<VchNo>${poCode}</VchNo>` +
-        `<STPTName>Local-18%</STPTName>` +
+        `<VchType>2</VchType>` +
+        `<VchNo>${invoiceNo}</VchNo>` +
+        `<STPTName>L/GST-MultiRate</STPTName>` +
         `<MasterName1>${vendorName}</MasterName1>` +
         `<MasterName2>TURNING POINT</MasterName2>` +
+        billingDetailsXml +
+        `<VchOtherInfoDetails>` +
+        `<Narration1>${poCode}</Narration1>` +
+        `</VchOtherInfoDetails>` +
         `<ItemEntries>${itemDetailsXml}</ItemEntries>` +
-        `</MaterialReceipt>`;
+        `</Purchase>`;
 
       // 3. Post to Busy ERP HTTP API
       const erpResult = await new Promise<{ success: boolean; message: string }>((resolve) => {
@@ -162,8 +202,7 @@ export class GrnController {
           headers: {
             'SC': '2',
             'Date': dateStr,
-            'VchType': '4',
-            'TranType': '3',
+            'VchType': '2',
             'UserName': process.env.BUSY_ERP_USERNAME || 'Nilesh',
             'Pwd': process.env.BUSY_ERP_PASSWORD || 'tppl@12_34',
             'Content-Type': 'application/xml',
