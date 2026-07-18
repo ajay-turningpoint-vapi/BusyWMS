@@ -228,7 +228,7 @@ export default function Damages() {
                     <TableCell sx={{ fontWeight: 600 }}>{dmg.BinCode}</TableCell>
                     <TableCell>{dmg.ItemName} ({dmg.ItemCode})</TableCell>
                     <TableCell>{dmg.BatchNumber || 'Standard'}</TableCell>
-                    <TableCell>{Number(dmg.Quantity).toFixed(2)}</TableCell>
+                    <TableCell>{Number(dmg.Quantity).toFixed(3)}</TableCell>
                     <TableCell>
                       <Chip label={dmg.DamageType} size="small" variant="outlined" />
                     </TableCell>

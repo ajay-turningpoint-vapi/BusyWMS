@@ -843,12 +843,12 @@ export default function Masters() {
                         <TableCell><code>{row.Code}</code></TableCell>
                         <TableCell>{row.HSNCode || 'N/A'}</TableCell>
                         <TableCell>{row.Category || 'General'}</TableCell>
-                        <TableCell>₹{parseFloat(row.AltSalePrice || 0).toFixed(2)}</TableCell>
-                        <TableCell>₹{parseFloat(row.MRP || 0).toFixed(2)}</TableCell>
-                        <TableCell>{parseFloat(row.SaleDiscount || 0).toFixed(2)}%</TableCell>
+                        <TableCell>₹{parseFloat(row.AltSalePrice || 0).toFixed(3)}</TableCell>
+                        <TableCell>₹{parseFloat(row.MRP || 0).toFixed(3)}</TableCell>
+                        <TableCell>{parseFloat(row.SaleDiscount || 0).toFixed(3)}%</TableCell>
                         <TableCell>{row.MainUnit || 'N/A'}</TableCell>
                         <TableCell>{row.AltUnit || 'N/A'}</TableCell>
-                        <TableCell>{parseFloat(row.Weight || 0).toFixed(4)}kg / {parseFloat(row.Volume || 0).toFixed(4)}L</TableCell>
+                        <TableCell>{parseFloat(row.Weight || 0).toFixed(3)}kg / {parseFloat(row.Volume || 0).toFixed(3)}L</TableCell>
                         <TableCell>
                           <Box sx={{ display: 'flex', gap: 1 }}>
                             <Button 

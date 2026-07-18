@@ -157,7 +157,7 @@ export class ASNController {
           INSERT INTO tblASNItem (
             ASNId, ItemId, ExpectedQty, ReceivedQty, UOM, BatchNumber, SerialNumber, ExpiryDate
           ) VALUES (
-            @asnId, @itemId, @expectedQty, 0.0000, @uom, @batchNumber, @serialNumber, @expiryDate
+            @asnId, @itemId, @expectedQty, 0.000, @uom, @batchNumber, @serialNumber, @expiryDate
           )
         `, {
           asnId,
@@ -239,7 +239,7 @@ export class ASNController {
           INSERT INTO tblASNItem (
             ASNId, ItemId, ExpectedQty, ReceivedQty, UOM, BatchNumber, SerialNumber, ExpiryDate
           ) VALUES (
-            @id, @itemId, @expectedQty, 0.0000, @uom, @batchNumber, @serialNumber, @expiryDate
+            @id, @itemId, @expectedQty, 0.000, @uom, @batchNumber, @serialNumber, @expiryDate
           )
         `, {
           id,

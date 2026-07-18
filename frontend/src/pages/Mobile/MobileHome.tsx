@@ -1650,7 +1650,7 @@ export default function MobileHome() {
                           Current Available: {bin.AvailableWeight}kg / {bin.AvailableVolume}L
                         </Typography>
                         <Typography variant="caption" fontWeight={700} color="primary" display="block">
-                          Projected Remaining: {remainingWeight.toFixed(2)}kg / {remainingVolume.toFixed(2)}L
+                          Projected Remaining: {remainingWeight.toFixed(3)}kg / {remainingVolume.toFixed(3)}L
                         </Typography>
                       </Box>
                     );

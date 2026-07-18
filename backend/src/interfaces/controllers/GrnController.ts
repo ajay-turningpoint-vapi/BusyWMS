@@ -86,22 +86,33 @@ export class GrnController {
       let poCode = '';
       let vendorName = '';
       if (poId) {
-        const poRows = await db.query('SELECT POCode, VendorName FROM tblPurchaseOrder WHERE POId = @poId', { poId });
+        const poRows = await db.query('SELECT POCode, VendorName, Status FROM tblPurchaseOrder WHERE POId = @poId', { poId });
         if (poRows.length > 0) {
           poCode = poRows[0].POCode || '';
           vendorName = poRows[0].VendorName || '';
+          
+          if (poRows[0].Status === 'PARTIAL') {
+            const syncedCount = await db.query('SELECT COUNT(*) as count FROM tblGRN WHERE POId = @poId AND IsSynced = 1', { poId });
+            const count = syncedCount[0].count;
+            if (count > 0) {
+              poCode = `${poCode}-${count}`;
+            }
+          }
         }
       }
 
       const itemsWithDetails: any[] = [];
       for (const item of validItems) {
         const itemRows = await db.query('SELECT Name, UOM FROM tblItem WHERE ItemId = @itemId', { itemId: item.itemId });
+        const podRows = poId ? await db.query('SELECT UnitPrice FROM tblPurchaseOrderDetail WHERE POId = @poId AND ItemId = @itemId', { poId, itemId: item.itemId }) : [];
         const itemName = itemRows.length > 0 ? itemRows[0].Name : '';
         const itemUom = itemRows.length > 0 ? itemRows[0].UOM : 'SQFT';
+        const unitPrice = podRows.length > 0 ? podRows[0].UnitPrice : 0;
         itemsWithDetails.push({
           ...item,
           itemName,
-          itemUom
+          itemUom,
+          unitPrice
         });
       }
 
@@ -125,6 +136,7 @@ export class GrnController {
           `<UnitName>${item.itemUom || 'SQFT'}</UnitName>` +
           `<AltUnitName>${item.itemUom || 'SQFT'}</AltUnitName>` +
           `<Qty>${item.receivedQty}</Qty>` +
+          `<ListPrice>${item.unitPrice || 0}</ListPrice>` +
           `</ItemDetail>`;
       });
 
@@ -228,14 +240,17 @@ export class GrnController {
         for (const poItem of poItems) {
           const currentGrnItem = validItems.find((vi: any) => vi.itemId === poItem.ItemId);
           const newGrnQty = currentGrnItem ? parseFloat(currentGrnItem.receivedQty || 0) : 0;
-          const remaining = poItem.OrderQty - (poItem.TotalGrnQty + newGrnQty);
-          if (remaining > 0) {
+          const orderQty = parseFloat(poItem.OrderQty || 0);
+          const totalGrnQty = parseFloat(poItem.TotalGrnQty || 0);
+          const remaining = orderQty - (totalGrnQty + newGrnQty);
+          // Due to floating point imprecision, use a small epsilon
+          if (remaining > 0.001) {
             isPartial = true;
             break;
           }
         }
 
-        const newStatus = isPartial ? 'PARTIAL' : 'GRN_CREATED';
+        const newStatus = isPartial ? 'PARTIAL' : 'COMPLETED';
 
         await db.executeCmd(`
           UPDATE tblPurchaseOrder SET Status = @newStatus, UpdatedAt = CURRENT_TIMESTAMP WHERE POId = @poId
@@ -657,20 +672,29 @@ export class GrnController {
       let poCode = '';
       let vendorName = '';
       if (grn.POId) {
-        const poRows = await db.query('SELECT POCode, VendorName FROM tblPurchaseOrder WHERE POId = @poId', { poId: grn.POId });
+        const poRows = await db.query('SELECT POCode, VendorName, Status FROM tblPurchaseOrder WHERE POId = @poId', { poId: grn.POId });
         if (poRows.length > 0) {
           poCode = poRows[0].POCode || '';
           vendorName = poRows[0].VendorName || '';
+          
+          if (poRows[0].Status === 'PARTIAL') {
+            const syncedCount = await db.query('SELECT COUNT(*) as count FROM tblGRN WHERE POId = @poId AND IsSynced = 1 AND GRNId < @grnId', { poId: grn.POId, grnId });
+            const count = syncedCount[0].count;
+            if (count > 0) {
+              poCode = `${poCode}-${count}`;
+            }
+          }
         }
       }
 
-      // 3. Fetch GRN details and item codes/names
+      // 3. Fetch GRN details and item codes/names/prices
       const details = await db.query(`
-        SELECT gd.ReceivedQty, item.Name AS itemName, item.UOM AS itemUom
+        SELECT gd.ReceivedQty, item.Name AS itemName, item.UOM AS itemUom, pod.UnitPrice
         FROM tblGRNDetail gd
         INNER JOIN tblItem item ON gd.ItemId = item.ItemId
+        LEFT JOIN tblPurchaseOrderDetail pod ON gd.ItemId = pod.ItemId AND pod.POId = @poId
         WHERE gd.GRNId = @grnId AND gd.ReceivedQty > 0
-      `, { grnId });
+      `, { grnId, poId: grn.POId || 0 });
 
       if (details.length === 0) {
         return res.status(400).json({ message: 'No valid items in this GRN to sync' });
@@ -683,7 +707,7 @@ export class GrnController {
         return `${day}-${month}-${year}`;
       };
 
-      const dateStr = getFormattedDate(new Date(grn.ReceivedDate));
+      const dateStr = getFormattedDate(new Date());
 
       let itemDetailsXml = '';
       details.forEach((item: any, index: number) => {
@@ -696,6 +720,7 @@ export class GrnController {
           `<UnitName>${item.itemUom || 'SQFT'}</UnitName>` +
           `<AltUnitName>${item.itemUom || 'SQFT'}</AltUnitName>` +
           `<Qty>${item.ReceivedQty}</Qty>` +
+          `<ListPrice>${item.UnitPrice || 0}</ListPrice>` +
           `</ItemDetail>`;
       });
 

@@ -318,7 +318,14 @@ export class ReportController {
         if (header.length === 0) return res.status(404).json({ message: 'Purchase Order not found' });
         const poId = header[0].POId;
         const items = await db.query(`
-          SELECT pod.*, item.Code AS ItemCode, item.Name AS ItemName, item.UOM 
+          SELECT pod.*, item.Code AS ItemCode, item.Name AS ItemName, item.UOM,
+                 (pod.OrderQty - pod.ReceivedQty - (
+                   SELECT COALESCE(SUM(gd.ReceivedQty), 0)
+                   FROM tblGRNDetail gd
+                   INNER JOIN tblGRN g ON gd.GRNId = g.GRNId
+                   WHERE gd.ItemId = pod.ItemId AND g.POId = pod.POId 
+                     AND g.Status IN ('PENDING', 'QC_COMPLETED', 'PARTIAL_PUTAWAY')
+                 )) AS PendingQty
           FROM tblPurchaseOrderDetail pod 
           INNER JOIN tblItem item ON pod.ItemId = item.ItemId 
           WHERE pod.POId = @poId

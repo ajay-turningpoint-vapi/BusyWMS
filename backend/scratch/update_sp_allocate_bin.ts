@@ -14,12 +14,12 @@ async function updateSp() {
     await db.query(`
       CREATE PROCEDURE sp_AllocateBinForPutaway(
           IN p_ItemId INT,
-          IN p_Qty DECIMAL(18,4),
+          IN p_Qty DECIMAL(18,3),
           IN p_PreferredWarehouseId INT
       )
       BEGIN
-          DECLARE v_ItemWeight DECIMAL(18,4);
-          DECLARE v_ItemVolume DECIMAL(18,4);
+          DECLARE v_ItemWeight DECIMAL(18,3);
+          DECLARE v_ItemVolume DECIMAL(18,3);
           
           SELECT 
               CASE WHEN COALESCE(Weight, 0) > 0 THEN Weight ELSE 2.0 END,

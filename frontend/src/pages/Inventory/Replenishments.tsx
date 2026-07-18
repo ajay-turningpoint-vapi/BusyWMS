@@ -149,7 +149,7 @@ export default function Replenishments() {
                         {sugg.itemName} ({sugg.itemCode})
                       </TableCell>
                       <TableCell>
-                        {Number(sugg.currentPickingStock).toFixed(2)} / {Number(sugg.minStock).toFixed(2)} {sugg.uom}
+                        {Number(sugg.currentPickingStock).toFixed(3)} / {Number(sugg.minStock).toFixed(3)} {sugg.uom}
                       </TableCell>
                       <TableCell>
                         <Chip label="Critical Shortage" color="error" size="small" variant="outlined" />
@@ -158,7 +158,7 @@ export default function Replenishments() {
                       <TableCell>{sugg.batchNumber || 'Standard'}</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>{sugg.toBinCode}</TableCell>
                       <TableCell sx={{ fontWeight: 700, color: 'primary.main' }}>
-                        {Number(sugg.suggestedQty).toFixed(2)} {sugg.uom}
+                        {Number(sugg.suggestedQty).toFixed(3)} {sugg.uom}
                       </TableCell>
                       <TableCell align="right">
                         <Button 

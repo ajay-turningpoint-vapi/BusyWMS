@@ -443,8 +443,8 @@ export default function CycleCounts() {
                       <TableCell>{ccd.ItemCode}</TableCell>
                       <TableCell>{ccd.ItemName}</TableCell>
                       <TableCell>{ccd.BatchNumber || 'N/A'}</TableCell>
-                      <TableCell>{systemQty.toFixed(2)}</TableCell>
-                      <TableCell>{countedQty !== null ? countedQty.toFixed(2) : <span style={{color: 'grey'}}>Not counted</span>}</TableCell>
+                      <TableCell>{systemQty.toFixed(3)}</TableCell>
+                      <TableCell>{countedQty !== null ? countedQty.toFixed(3) : <span style={{color: 'grey'}}>Not counted</span>}</TableCell>
                       <TableCell sx={{ 
                         fontWeight: 700, 
                         color: variance > 0 ? 'success.main' : (variance < 0 ? 'error.main' : 'text.primary') 
@@ -506,7 +506,7 @@ export default function CycleCounts() {
                     <TableCell sx={{ fontWeight: 600 }}>{ccd.BinCode}</TableCell>
                     <TableCell>{ccd.ItemName} ({ccd.ItemCode})</TableCell>
                     <TableCell>{ccd.BatchNumber || 'Standard'}</TableCell>
-                    <TableCell>{Number(ccd.SystemQty).toFixed(2)}</TableCell>
+                    <TableCell>{Number(ccd.SystemQty).toFixed(3)}</TableCell>
                     <TableCell>
                       <TextField
                         type="number"

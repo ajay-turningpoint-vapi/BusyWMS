@@ -319,7 +319,7 @@ export default function Returns() {
                     <TableCell>{ret.ReferenceCode || 'N/A'}</TableCell>
                     <TableCell>{ret.ItemName} ({ret.ItemCode})</TableCell>
                     <TableCell>{ret.BatchNumber || 'Standard'}</TableCell>
-                    <TableCell>{Number(ret.Quantity).toFixed(2)}</TableCell>
+                    <TableCell>{Number(ret.Quantity).toFixed(3)}</TableCell>
                     <TableCell>{ret.Reason || 'N/A'}</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>{ret.BinCode}</TableCell>
                     <TableCell>{getStatusChip(ret.Status)}</TableCell>

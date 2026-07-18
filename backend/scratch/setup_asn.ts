@@ -136,7 +136,7 @@ async function setupAsn() {
       for (const item of asn.Items) {
         await connection.query(`
           INSERT INTO tblASNItem (ASNId, ItemId, ExpectedQty, ReceivedQty, UOM, BatchNumber)
-          VALUES (?, ?, ?, 0.0000, ?, ?)
+          VALUES (?, ?, ?, 0.000, ?, ?)
         `, [
           asnId, item.ItemId, item.ExpectedQty, item.UOM, item.BatchNumber
         ]);

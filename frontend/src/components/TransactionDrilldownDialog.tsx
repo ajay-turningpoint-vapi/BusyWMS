@@ -47,7 +47,7 @@ export default function TransactionDrilldownDialog() {
               name: item.ItemName,
               qty: item.OrderQty,
               received: item.ReceivedQty,
-              pending: item.OrderQty - item.ReceivedQty,
+              pending: item.PendingQty !== undefined && item.PendingQty !== null ? Number(item.PendingQty) : (item.OrderQty - item.ReceivedQty),
               uom: item.UOM || 'PCS'
             }))
           });
@@ -718,6 +718,7 @@ export default function TransactionDrilldownDialog() {
                       </>
                     )}
                     <TableCell sx={{ fontWeight: 600 }}>{type === 'ASN' ? 'Expected Qty' : 'Quantity'}</TableCell>
+                    {type === 'PO' && data?.status === 'PARTIAL' && <TableCell sx={{ fontWeight: 600, color: 'warning.main' }}>Pending</TableCell>}
                     {type === 'PO' && <TableCell sx={{ fontWeight: 600 }}>Received</TableCell>}
                     {type === 'ASN' && (
                        <>
@@ -759,6 +760,7 @@ export default function TransactionDrilldownDialog() {
                         </>
                       )}
                       <TableCell>{line.qty} {line.uom || 'PCS'}</TableCell>
+                      {type === 'PO' && data?.status === 'PARTIAL' && <TableCell sx={{ color: 'warning.main', fontWeight: 600 }}>{line.pending} {line.uom}</TableCell>}
                       {type === 'PO' && <TableCell>{line.received} {line.uom}</TableCell>}
                       {type === 'ASN' && (
                          <>

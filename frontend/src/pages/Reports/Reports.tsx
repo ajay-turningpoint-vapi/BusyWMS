@@ -536,7 +536,7 @@ export default function Reports() {
 
   // CSV Export
   const exportCSV = () => {
-    const reportNames = ['Stock_Status_Ledger', 'Pending_Sales_Order_Report', 'Pending_Purchase_Order_Report', 'Created_GRNs_Report', 'System_Security_Audit_Trail', '', 'Bin_Capacity_Report', `ASN_${asnReportView}_Report`, 'Replenishment_And_Reorder_Alerts'];
+    const reportNames = ['Stock_Status_Ledger', 'Pending_Sales_Order_Report', 'Pending_Purchase_Order_Report', 'GRNs_Report', 'System_Security_Audit_Trail', '', 'Bin_Capacity_Report', `ASN_${asnReportView}_Report`, 'Replenishment_And_Reorder_Alerts'];
     const headers = getHeaderList();
     const keys = getKeysList();
     
@@ -546,6 +546,9 @@ export default function Reports() {
     getSourceData().forEach((row) => {
       const line = keys.map(key => {
         let val = row[key];
+        if (tabValue === 3 && key === 'Status' && val === 'PENDING') {
+          val = 'GRN_CREATED';
+        }
         if (typeof val === 'string') {
           val = `"${val.replace(/"/g, '""')}"`;
         }
@@ -565,7 +568,7 @@ export default function Reports() {
 
   // PDF & Print Report
   const handlePrint = () => {
-    const titles = ['Stock Status Ledger', 'Pending Sales Order Report', 'Pending Purchase Order Report', 'Created GRNs Report', 'System Security Audit Trail', '', 'Bin Capacity Utilization Report', `ASN ${asnReportView.toUpperCase()} Report`, 'Replenishment & Reorder Alerts'];
+    const titles = ['Stock Status Ledger', 'Pending Sales Order Report', 'Pending Purchase Order Report', 'GRNs Report', 'System Security Audit Trail', '', 'Bin Capacity Utilization Report', `ASN ${asnReportView.toUpperCase()} Report`, 'Replenishment & Reorder Alerts'];
     const headers = getHeaderList();
     const keys = getKeysList();
     
@@ -1032,7 +1035,7 @@ export default function Reports() {
                             </>
                           ) : (
                             <>
-                              <MenuItem value="PENDING">Pending QC</MenuItem>
+                              <MenuItem value="PENDING">GRN_CREATED</MenuItem>
                               <MenuItem value="QC_COMPLETED">QC Completed</MenuItem>
                               <MenuItem value="PUTAWAY_COMPLETED">Putaway Completed</MenuItem>
                             </>
@@ -1523,7 +1526,7 @@ export default function Reports() {
                           </>
                         )}
 
-                        {/* Tab 3: Created GRNs */}
+                        {/* Tab 3: GRNs */}
                         {tabValue === 3 && (
                           <>
                             <TableCell><TransactionLink type="GRN" id={row.GRNCode} /></TableCell>
@@ -1534,7 +1537,7 @@ export default function Reports() {
                             <TableCell>
                               <Chip 
                                 size="small" 
-                                label={row.Status} 
+                                label={row.Status === 'PENDING' ? 'GRN_CREATED' : row.Status} 
                                 color={row.Status === 'QC_COMPLETED' || row.Status === 'PUTAWAY_COMPLETED' ? 'success' : 'warning'}
                                 sx={{ fontWeight: 600 }}
                               />
