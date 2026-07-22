@@ -499,6 +499,32 @@ export class InventoryController {
     }
   }
 
+  // Get count of non-optimal stock items
+  public static async getNonOptimalCount(req: AuthenticatedRequest, res: Response) {
+    try {
+      const sql = `
+        SELECT COUNT(*) AS total
+        FROM tblItem i
+        LEFT JOIN (
+          SELECT ItemId, SUM(Quantity) AS TotalQuantity
+          FROM tblInventory
+          GROUP BY ItemId
+        ) invSum ON i.ItemId = invSum.ItemId
+        WHERE i.IsActive = 1 AND (
+          (COALESCE(i.MinStock, 0) > 0 AND COALESCE(invSum.TotalQuantity, 0) < i.MinStock)
+          OR
+          (COALESCE(i.MaxStock, 0) > 0 AND COALESCE(i.MaxStock, 0) < 999990 AND COALESCE(invSum.TotalQuantity, 0) > i.MaxStock)
+        )
+      `;
+      const result = await db.query(sql);
+      const total = result[0]?.total || 0;
+      return res.json({ count: total });
+    } catch (err: any) {
+      console.error('Failed to get non-optimal count:', err);
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
   // Get bin breakdown for a specific item
   public static async getItemBinBreakdown(req: AuthenticatedRequest, res: Response) {
     const { itemId } = req.params;

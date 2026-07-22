@@ -51,6 +51,22 @@ export default function MainLayout() {
       .catch(err => console.error('Failed to fetch WMS features', err));
   }, [location.pathname]);
 
+  const [nonOptimalCount, setNonOptimalCount] = useState(0);
+
+  useEffect(() => {
+    const checkNonOptimal = () => {
+      api.get('/inventory/non-optimal-count')
+        .then(res => {
+          setNonOptimalCount(res.data.count || 0);
+        })
+        .catch(err => console.error('Failed to get non-optimal stock counts', err));
+    };
+
+    checkNonOptimal();
+    const interval = setInterval(checkNonOptimal, 30000);
+    return () => clearInterval(interval);
+  }, [location.pathname]);
+
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('wms_sidebar_open');
     return saved !== null ? saved === 'true' : true;
@@ -232,7 +248,16 @@ export default function MainLayout() {
     { text: 'Returns & Restocking', icon: <CornerDownLeft size={18} />, path: '/inbound/returns', category: 'Inbound', featureCode: 'MODULE_RETURNS' },
  
     // Stock Adjust
-    { text: 'Stock Available', icon: <Layers size={18} />, path: '/inventory/stock-available', category: 'Inventory' },
+    { 
+      text: 'Stock Available', 
+      icon: (
+        <Badge color="error" variant="dot" invisible={nonOptimalCount === 0}>
+          <Layers size={18} />
+        </Badge>
+      ), 
+      path: '/inventory/stock-available', 
+      category: 'Inventory' 
+    },
     { text: 'Stock Transfer', icon: <Warehouse size={18} />, path: '/inventory/transfer', category: 'Inventory' },
     { text: 'Replenishment Moves', icon: <RefreshCw size={18} />, path: '/inventory/replenish', category: 'Inventory', featureCode: 'MODULE_REPLENISHMENT' },
     { text: 'Cycle Counting', icon: <ListTodo size={18} />, path: '/inventory/cycle-count', category: 'Inventory' },

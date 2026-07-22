@@ -183,6 +183,7 @@ app.get('/api/putaway/history', authenticateJWT, requirePermission('Inbound', 'r
 // Inventory & Stock Transfers
 app.get('/api/inventory/stock', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getInventory);
 app.get('/api/inventory/stock-available', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getItemStockSummary);
+app.get('/api/inventory/non-optimal-count', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getNonOptimalCount);
 app.get('/api/inventory/item-bins/:itemId', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getItemBinBreakdown);
 app.get('/api/inventory/serials', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getSerialStocks);
 app.post('/api/inventory/transfer', authenticateJWT, requirePermission('Inventory', 'create'), InventoryController.transferStock);
