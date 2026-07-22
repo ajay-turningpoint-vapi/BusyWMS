@@ -3,7 +3,7 @@ import {
   Box, Typography, Button, Card, Grid, Autocomplete,
   Table, TableBody, TableCell, TableContainer, 
   TableHead, TableRow, TextField, Alert, CircularProgress, Chip,
-  Dialog, DialogTitle, DialogContent, DialogActions
+  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment
 } from '@mui/material';
 import { ArrowLeft, Check, Printer, Scan } from 'lucide-react';
 import api from '../../services/api';
@@ -91,8 +91,21 @@ export default function GRN() {
       
       res.data.forEach((item: any) => {
         qtys[item.ItemId] = item.PendingQty;
-        if (item.TrackBatch) btchs[item.ItemId] = `BAT-${Date.now().toString().slice(-4)}`;
-        if (item.TrackSerial) srls[item.ItemId] = '';
+        const datePrefix = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const randSuffix = Math.floor(1000 + Math.random() * 9000);
+
+        if (item.TrackBatch) {
+          btchs[item.ItemId] = `BAT-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}`;
+          const oneYearLater = new Date();
+          oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+          exps[item.ItemId] = oneYearLater.toISOString().split('T')[0];
+        }
+        if (item.TrackSerial) {
+          const qty = item.PendingQty || 0;
+          srls[item.ItemId] = Array.from({ length: qty }, (_, idx) => 
+            `SR-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}-${idx + 1}`
+          ).join(', ');
+        }
       });
 
       setReceivedQtys(qtys);
@@ -121,6 +134,35 @@ export default function GRN() {
 
   const handleSerialChange = (itemId: number, val: string) => {
     setSerials(prev => ({ ...prev, [itemId]: val }));
+  };
+
+  const handleAutoGenerate = (itemId: number) => {
+    const item = poDetails.find(i => i.ItemId === itemId);
+    if (!item) return;
+
+    const qty = receivedQtys[itemId] || 0;
+    const datePrefix = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const randSuffix = Math.floor(1000 + Math.random() * 9000);
+
+    if (item.TrackBatch) {
+      setBatches(prev => ({
+        ...prev,
+        [itemId]: `BAT-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}`
+      }));
+      const oneYearLater = new Date();
+      oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+      setExpiries(prev => ({
+        ...prev,
+        [itemId]: oneYearLater.toISOString().split('T')[0]
+      }));
+    }
+
+    if (item.TrackSerial && qty > 0) {
+      const generated = Array.from({ length: qty }, (_, idx) =>
+        `SR-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}-${idx + 1}`
+      ).join(', ');
+      setSerials(prev => ({ ...prev, [itemId]: generated }));
+    }
   };
 
   const handleSubmitGRN = async () => {
@@ -477,7 +519,18 @@ export default function GRN() {
         <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
       ) : poDetails.length > 0 ? (
         <Card sx={{ p: 3 }}>
-          <Typography variant="h4" sx={{ mb: 3, fontWeight: 700 }}>PO Line Items</Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h4" sx={{ fontWeight: 700, m: 0 }}>PO Line Items</Typography>
+            <Button 
+              size="small" 
+              variant="outlined" 
+              color="secondary"
+              onClick={() => poDetails.forEach(item => handleAutoGenerate(item.ItemId))}
+              sx={{ fontWeight: 700 }}
+            >
+              Auto-Generate All Tracking Codes
+            </Button>
+          </Box>
           <TableContainer>
             <Table size="small">
               <TableHead>
@@ -537,6 +590,13 @@ export default function GRN() {
                                     fullWidth
                                     value={batches[item.ItemId] || ''} 
                                     onChange={(e) => handleBatchChange(item.ItemId, e.target.value)} 
+                                    InputProps={{
+                                      endAdornment: (
+                                        <InputAdornment position="end">
+                                          <Button size="small" variant="text" onClick={() => handleAutoGenerate(item.ItemId)} sx={{ textTransform: 'none', minWidth: 'auto', p: 0.5, fontWeight: 700 }}>Auto</Button>
+                                        </InputAdornment>
+                                      )
+                                    }}
                                   />
                                 </Grid>
                                 <Grid item xs={12} sm={6} md={3}>
@@ -561,6 +621,13 @@ export default function GRN() {
                                   fullWidth
                                   value={serials[item.ItemId] || ''} 
                                   onChange={(e) => handleSerialChange(item.ItemId, e.target.value)} 
+                                  InputProps={{
+                                    endAdornment: (
+                                      <InputAdornment position="end">
+                                        <Button size="small" variant="text" onClick={() => handleAutoGenerate(item.ItemId)} sx={{ textTransform: 'none', minWidth: 'auto', p: 0.5, fontWeight: 700 }}>Auto</Button>
+                                      </InputAdornment>
+                                    )
+                                  }}
                                 />
                               </Grid>
                             )}
