@@ -118,7 +118,7 @@ export class OutboundController {
     try {
       // Find all active reservations
       const reservations = await db.query(`SELECT * FROM tblReservation WHERE SOId = @soId AND Status = 'ACTIVE'`, { soId });
-      
+
       for (const resv of reservations) {
         // Decrease reserved qty from inventory (cross-DB safe CASE WHEN instead of MAX)
         await db.executeCmd(`
@@ -154,7 +154,7 @@ export class OutboundController {
 
     try {
       const pickCode = `PICK-${Date.now()}`;
-      
+
       // 1. Create Pick List Header
       const pickResult = await db.executeCmd(`
         INSERT INTO tblPickList (PickCode, SOId, CreatedBy, AssignedTo, Status)
@@ -206,7 +206,7 @@ export class OutboundController {
     const { pickListId } = req.params;
     try {
       const rows = await db.query(`
-        SELECT pd.*, i.Name AS ItemName, i.Code AS ItemCode, b.Code AS BinCode, b.Barcode AS BinBarcode, bat.BatchNumber,
+        SELECT pd.*, i.Name AS ItemName, i.Code AS ItemCode, i.TrackSerial AS TrackSerial, b.Code AS BinCode, b.Barcode AS BinBarcode, bat.BatchNumber,
                z.Code AS ZoneCode, z.Name AS ZoneName, r.Code AS RackCode, r.Name AS RackName, s.Code AS ShelfCode, s.Name AS ShelfName
         FROM tblPickListDetail pd
         INNER JOIN tblItem i ON pd.ItemId = i.ItemId
@@ -293,7 +293,7 @@ export class OutboundController {
         if (itemDef.length > 0 && itemDef[0].MinStock !== null && remainingQty < Number(itemDef[0].MinStock)) {
           const minStock = Number(itemDef[0].MinStock);
           const itemName = itemDef[0].Name;
-          
+
           await db.executeCmd(`
             INSERT INTO tblNotification (Type, Title, Message, IsRead, CreatedAt)
             VALUES ('LOW_STOCK', 'Low Stock Alert', @msg, 0, CURRENT_TIMESTAMP)
@@ -304,7 +304,7 @@ export class OutboundController {
             SELECT AlertLogId FROM tblStockAlertLog 
             WHERE ItemId = @itemId AND AlertType = 'BELOW_MIN' AND Status = 'ACTIVE'
           `, { itemId: pd.ItemId });
-          
+
           if (activeLog.length === 0) {
             await db.executeCmd(`
               INSERT INTO tblStockAlertLog (ItemId, AlertType, CurrentStock, ThresholdValue, ReferenceDoc, Status)
@@ -352,7 +352,7 @@ export class OutboundController {
 
       if (lines[0].pendingLines === 0) {
         await db.executeCmd(`UPDATE tblPickList SET Status = 'COMPLETED', UpdatedAt = CURRENT_TIMESTAMP WHERE PickListId = @pickListId`, { pickListId });
-        
+
         // Update Sales Order status
         const pickHeader = await db.query('SELECT SOId FROM tblPickList WHERE PickListId = @pickListId', { pickListId });
         if (pickHeader.length > 0) {
@@ -370,7 +370,7 @@ export class OutboundController {
   // ==========================================
   // SALES ORDER CRUD (MANUAL)
   // ==========================================
-  
+
   public static async createSalesOrder(req: AuthenticatedRequest, res: Response) {
     const { SOCode, CustomerName, CustomerCode, OrderDate, Items } = req.body;
     const userId = req.user?.userId || 1;
@@ -547,10 +547,10 @@ export class OutboundController {
   // PACKING
   // ==========================================
   public static async executePacking(req: AuthenticatedRequest, res: Response) {
-    const { 
-      pickListId, 
-      cartonNo, 
-      palletNo, 
+    const {
+      pickListId,
+      cartonNo,
+      palletNo,
       shippingLabel,
       grossWeight,
       lengthCm,
@@ -574,12 +574,12 @@ export class OutboundController {
           @packCode, @pickListId, @userId, CURRENT_TIMESTAMP, @cartonNo, @palletNo, @shippingLabel,
           @grossWeight, @lengthCm, @widthCm, @heightCm, @itemCount, @notes, 'PACKED'
         )
-      `, { 
-        packCode, 
-        pickListId, 
-        userId, 
-        cartonNo: cartonNo || null, 
-        palletNo: palletNo || null, 
+      `, {
+        packCode,
+        pickListId,
+        userId,
+        cartonNo: cartonNo || null,
+        palletNo: palletNo || null,
         shippingLabel: shippingLabel || null,
         grossWeight: grossWeight || null,
         lengthCm: lengthCm || null,
@@ -640,9 +640,9 @@ export class OutboundController {
       await db.executeCmd(`
         INSERT INTO tblApiLog (SyncType, Direction, Endpoint, RequestPayload, ResponsePayload, Status)
         VALUES ('DISPATCH_SYNC', 'OUTBOUND', '/erp/sync/dispatch', @req, @res, 'SUCCESS')
-      `, { 
-        req: JSON.stringify({ soId, dispatchCode, deliveryChallanNo, lrNumber }), 
-        res: '{"status": "SYNCED_TO_BUSY_ERP"}' 
+      `, {
+        req: JSON.stringify({ soId, dispatchCode, deliveryChallanNo, lrNumber }),
+        res: '{"status": "SYNCED_TO_BUSY_ERP"}'
       });
 
       return res.status(201).json({ message: 'Dispatch completed and status synced back to BUSY ERP', dispatchCode });

@@ -113,6 +113,8 @@ export class AuthController {
 
       return res.json({
         message: 'Logged in successfully',
+        token,
+        refreshToken,
         user: {
           userId: user.UserId,
           username: user.Username,

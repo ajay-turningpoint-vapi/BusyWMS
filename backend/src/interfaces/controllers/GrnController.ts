@@ -42,11 +42,15 @@ export class GrnController {
 
   // Create Goods Receipt Note
   public static async createGRN(req: AuthenticatedRequest, res: Response) {
-    const { poId, invoiceNo, items } = req.body;
+    const { poId, invoiceNo, invoiceDate, items } = req.body;
     const userId = req.user?.userId || 1;
 
     if (!invoiceNo || invoiceNo.trim() === '') {
       return res.status(400).json({ message: 'Supplier Invoice Reference is mandatory' });
+    }
+
+    if (!invoiceDate || invoiceDate.trim() === '') {
+      return res.status(400).json({ message: 'Supplier Invoice Date is mandatory' });
     }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -111,32 +115,50 @@ export class GrnController {
       }
 
       const itemsWithDetails: any[] = [];
+      let totalGstAmt = 0;
+      let gstRateForSundry = 0;
+
       for (const item of validItems) {
         const itemRows = await db.query('SELECT Name, UOM, HSNCode, MRP, AltUnit, PurchPrice, MainUnit FROM tblItem WHERE ItemId = @itemId', { itemId: item.itemId });
-        const podRows = poId ? await db.query('SELECT UnitPrice FROM tblPurchaseOrderDetail WHERE POId = @poId AND ItemId = @itemId', { poId, itemId: item.itemId }) : [];
+        const podRows = poId ? await db.query('SELECT UnitPrice, TotalAmount, MRP, DP, PurDis, DiscStr, GSTRate FROM tblPurchaseOrderDetail WHERE POId = @poId AND ItemId = @itemId', { poId, itemId: item.itemId }) : [];
         const itemName = itemRows.length > 0 ? itemRows[0].Name : '';
         const itemUom = itemRows.length > 0 ? itemRows[0].UOM : 'SQFT';
-        const unitPrice = podRows.length > 0 ? podRows[0].UnitPrice : 0;
+        const pod = podRows.length > 0 ? podRows[0] : {};
+        const unitPrice = pod.UnitPrice || 0;
+        const mrpVal = pod.MRP || (itemRows.length > 0 ? itemRows[0].MRP : 0) || 0;
+        const gstRate = pod.GSTRate || 0;
+
+        if (gstRate > 0) {
+          gstRateForSundry = gstRate;
+          const lineAmt = parseFloat(item.receivedQty) * parseFloat(unitPrice || 0);
+          totalGstAmt += (lineAmt * (gstRate / 100));
+        }
+
         itemsWithDetails.push({
           ...item,
           itemName,
           itemUom,
           unitPrice,
           hsnCode: itemRows.length > 0 ? (itemRows[0].HSNCode || '') : '',
-          mrp: itemRows.length > 0 ? (itemRows[0].MRP || 0) : 0,
+          mrp: mrpVal,
+          dp: pod.DP || 0,
+          purDis: pod.PurDis || 0,
+          discStr: pod.DiscStr || '',
+          gstRate,
           mainUnit: itemRows.length > 0 ? (itemRows[0].MainUnit || '') : '',
           altUnit: itemRows.length > 0 ? (itemRows[0].AltUnit || '') : ''
         });
       }
 
-      const getFormattedDate = (date: Date = new Date()): string => {
+      const getFormattedDate = (dateVal?: string): string => {
+        const date = dateVal ? new Date(dateVal) : new Date();
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = date.getFullYear();
         return `${day}-${month}-${year}`;
       };
 
-      const dateStr = getFormattedDate();
+      const dateStr = getFormattedDate(invoiceDate);
 
       let itemDetailsXml = '';
       itemsWithDetails.forEach((item, index) => {
@@ -157,6 +179,26 @@ export class GrnController {
           `<ItemMRP>${item.mrp || 0}</ItemMRP>` +
           `</ItemDetail>`;
       });
+
+      let billSundriesXml = '';
+      if (totalGstAmt > 0 && gstRateForSundry > 0) {
+        const halfRate = (gstRateForSundry / 2).toFixed(2);
+        const halfAmt = (totalGstAmt / 2).toFixed(2);
+        billSundriesXml = `<BillSundries>` +
+          `<BSDetail>` +
+          `<SrNo>1</SrNo>` +
+          `<BSName>CGST</BSName>` +
+          `<PercentVal>${halfRate}</PercentVal>` +
+          `<Amt>${halfAmt}</Amt>` +
+          `</BSDetail>` +
+          `<BSDetail>` +
+          `<SrNo>2</SrNo>` +
+          `<BSName>SGST</BSName>` +
+          `<PercentVal>${halfRate}</PercentVal>` +
+          `<Amt>${halfAmt}</Amt>` +
+          `</BSDetail>` +
+          `</BillSundries>`;
+      }
 
       let billingDetailsXml = '';
       if (supplierDetails) {
@@ -190,6 +232,7 @@ export class GrnController {
         `<Narration1>${poCode}</Narration1>` +
         `</VchOtherInfoDetails>` +
         `<ItemEntries>${itemDetailsXml}</ItemEntries>` +
+        billSundriesXml +
         `</Purchase>`;
 
       // 3. Post to Busy ERP HTTP API

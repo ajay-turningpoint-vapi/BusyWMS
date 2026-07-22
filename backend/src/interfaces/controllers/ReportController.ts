@@ -979,7 +979,7 @@ export class ReportController {
         SELECT so.SOId, so.SOCode, so.OrderDate, so.CustomerName, so.CustomerCode,
                sod.SODetailId, sod.ItemId, sod.OrderQty, sod.ShippedQty, sod.UOM,
                item.Code AS ItemCode, item.Name AS ItemName,
-               COALESCE(w.Code, 'WH-DEL') AS WarehouseCode
+               COALESCE(w.Code, 'WH003') AS WarehouseCode
         ${baseQuery}
         ORDER BY so.OrderDate DESC, so.SOId DESC
         LIMIT @limit OFFSET @offset
@@ -1090,7 +1090,7 @@ export class ReportController {
         SELECT po.POId, po.POCode, po.OrderDate, po.VendorName, po.VendorCode,
                pod.PODetailId, pod.ItemId, pod.OrderQty, pod.ReceivedQty, pod.UOM,
                item.Code AS ItemCode, item.Name AS ItemName,
-               COALESCE(w.Code, 'WH-DEL') AS WarehouseCode
+                COALESCE(w.Code, 'WH003') AS WarehouseCode
         ${baseQuery}
         ORDER BY po.OrderDate DESC, po.POId DESC
         LIMIT @limit OFFSET @offset

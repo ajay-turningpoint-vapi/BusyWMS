@@ -8,7 +8,7 @@ import {
 import { 
   Smartphone, Scan, ArrowLeft, Clipboard, MapPin, 
   Package, Truck, RefreshCcw, Check, Info, Camera, 
-  Printer, ArrowRightLeft, Copy, Plus, Trash2, ShieldAlert
+  Printer, ArrowRightLeft, Copy, Plus, Trash2, ShieldAlert, LogOut
 } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import api from '../../services/api';
@@ -28,11 +28,20 @@ interface ScannedItem {
 }
 
 export default function MobileHome() {
-  const { user } = useAuthStore();
-  const [screen, setScreen] = useState<'menu' | 'grn' | 'asn' | 'putaway' | 'pick' | 'pack' | 'dispatch' | 'count' | 'transfer' | 'print'>('menu');
+  const { user, logout } = useAuthStore();
+  const [screen, setScreen] = useState<'menu' | 'grn' | 'asn' | 'putaway' | 'pick' | 'pack' | 'dispatch' | 'count' | 'transfer' | 'print' | 'qc'>('menu');
   const [barcodeInput, setBarcodeInput] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
   
+  // QC States
+  const [qcGRNs, setQcGRNs] = useState<any[]>([]);
+  const [selectedQCGRN, setSelectedQCGRN] = useState<any>(null);
+  const [qcDetails, setQcDetails] = useState<any[]>([]);
+  const [qcRemarks, setQcRemarks] = useState('');
+  const [qcAcceptedQtys, setQcAcceptedQtys] = useState<Record<number, number>>({});
+  const [qcRejectedQtys, setQcRejectedQtys] = useState<Record<number, number>>({});
+  const [qcReasons, setQcReasons] = useState<Record<number, string>>({});
+
   // Data lists fetched from backend
   const [items, setItems] = useState<ScannedItem[]>([]);
   const [bins, setBins] = useState<any[]>([]);
@@ -134,7 +143,8 @@ export default function MobileHome() {
         api.get('/putaway/pending'),
         api.get('/inventory/stock'),
         api.get('/inbound/asn'),
-        api.get('/outbound/sales-orders?limit=100')
+        api.get('/outbound/sales-orders?limit=100'),
+        api.get('/inbound/grns')
       ]);
 
       const getValue = (res: any) => res.status === 'fulfilled' ? res.value.data : null;
@@ -150,6 +160,9 @@ export default function MobileHome() {
       
       const soData = getValue(results[8]);
       setSOs(soData ? (soData.items || soData || []) : []);
+
+      const grnData = getValue(results[9]) || [];
+      setQcGRNs(grnData.filter((g: any) => g.Status === 'PENDING'));
     } catch (err) {
       console.error(err);
       showFeedback('error', 'Error loading warehouse master tables.');
@@ -982,6 +995,71 @@ export default function MobileHome() {
     }
   };
 
+  // QC Handlers
+  const selectQCGRN = async (grn: any) => {
+    try {
+      setLoading(true);
+      const res = await api.get(`/inbound/grn-details/${grn.GRNId}`);
+      setSelectedQCGRN(grn);
+      setQcDetails(res.data);
+      setQcRemarks('');
+      
+      const acc: Record<number, number> = {};
+      const rej: Record<number, number> = {};
+      const reas: Record<number, string> = {};
+
+      res.data.forEach((item: any) => {
+        const totalQty = item.ReceivedQty || 0;
+        acc[item.ItemId] = totalQty;
+        rej[item.ItemId] = 0;
+        reas[item.ItemId] = '';
+      });
+
+      setQcAcceptedQtys(acc);
+      setQcRejectedQtys(rej);
+      setQcReasons(reas);
+      showFeedback('success', `Loaded GRN ${grn.GRNCode}. Perform inspection.`);
+    } catch (err) {
+      showFeedback('error', 'Failed to retrieve GRN details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitQC = async () => {
+    if (!selectedQCGRN || qcDetails.length === 0) return;
+    try {
+      setLoading(true);
+      const itemsPayload = qcDetails.map(item => {
+        const acceptedQty = qcAcceptedQtys[item.ItemId] || 0;
+        const rejectedQty = qcRejectedQtys[item.ItemId] || 0;
+        return {
+          itemId: item.ItemId,
+          acceptedQty,
+          rejectedQty,
+          rejectionReason: qcReasons[item.ItemId] || null
+        };
+      });
+
+      const payload = {
+        grnId: selectedQCGRN.GRNId,
+        status: 'APPROVED',
+        remarks: qcRemarks,
+        items: itemsPayload
+      };
+
+      await api.post('/inbound/qc', payload);
+      showFeedback('success', `Quality inspection logged successfully for ${selectedQCGRN.GRNCode}.`);
+      setSelectedQCGRN(null);
+      setQcDetails([]);
+      setScreen('menu');
+    } catch (err: any) {
+      showFeedback('error', err.response?.data?.message || 'Failed to submit QC.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Helper reset functions
   const resetWorkflow = () => {
     setGrnSelectedPO(null);
@@ -1009,6 +1087,9 @@ export default function MobileHome() {
 
     setPackPickList(null);
     setDispatchSelectedSO(null);
+    setSelectedQCGRN(null);
+    setQcDetails([]);
+    setQcRemarks('');
   };
 
   return (
@@ -1055,9 +1136,12 @@ export default function MobileHome() {
             <Typography variant="h5" sx={{ fontWeight: 800, color: 'primary.main', display: 'flex', alignItems: 'center', gap: 0.5, fontSize: 14 }}>
               <Smartphone size={16} /> Zebra TC21 WMS
             </Typography>
-            <Box sx={{ display: 'flex', gap: 0.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <Chip label="PRINT" size="small" variant="outlined" color="primary" onClick={() => setScreen('print')} sx={{ fontSize: 9, height: 18, cursor: 'pointer' }} />
               <Chip label="WH-01" size="small" color="primary" sx={{ fontSize: 9, height: 18, fontWeight: 700 }} />
+              <IconButton size="small" color="error" onClick={() => logout()} title="Logout" sx={{ ml: 0.5 }}>
+                <LogOut size={16} />
+              </IconButton>
             </Box>
           </Box>
 
@@ -1083,137 +1167,191 @@ export default function MobileHome() {
           {/* ==================================================== */}
           {/* SCREEN: MENU                                         */}
           {/* ==================================================== */}
-          {screen === 'menu' && (
-            <Box sx={{ flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-              <Typography variant="h5" align="center" sx={{ fontWeight: 800, mb: 2.5, fontSize: 16 }}>Operator Terminal</Typography>
-              
-              <Grid container spacing={1.5} sx={{ mb: 2 }}>
-                <Grid item xs={6}>
-                  <Button 
-                    fullWidth 
-                    variant="outlined" 
-                    onClick={() => setScreen('grn')}
-                    sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
-                  >
-                    <Scan size={26} color="#1a73e8" />
-                    <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>GRN Scan</Typography>
-                  </Button>
-                </Grid>
-                <Grid item xs={6}>
-                  <Button 
-                    fullWidth 
-                    variant="outlined" 
-                    onClick={() => setScreen('asn')}
-                    sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
-                  >
-                    <Truck size={26} color="#0d9488" />
-                    <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>ASN Inbound</Typography>
-                  </Button>
-                </Grid>
-                <Grid item xs={6}>
-                  <Button 
-                    fullWidth 
-                    variant="outlined" 
-                    onClick={() => setScreen('putaway')}
-                    sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
-                  >
-                    <MapPin size={26} color="#a855f7" />
-                    <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Putaway Scan</Typography>
-                  </Button>
-                </Grid>
-                <Grid item xs={6}>
-                  <Button 
-                    fullWidth 
-                    variant="outlined" 
-                    onClick={() => setScreen('pick')}
-                    sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
-                  >
-                    <Clipboard size={26} color="#f97316" />
-                    <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Pick Scan</Typography>
-                  </Button>
-                </Grid>
-                <Grid item xs={6}>
-                  <Button 
-                    fullWidth 
-                    variant="outlined" 
-                    onClick={() => setScreen('pack')}
-                    sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
-                  >
-                    <Package size={26} color="#ec4899" />
-                    <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Pack Scan</Typography>
-                  </Button>
-                </Grid>
-                <Grid item xs={6}>
-                  <Button 
-                    fullWidth 
-                    variant="outlined" 
-                    onClick={() => setScreen('dispatch')}
-                    sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
-                  >
-                    <Truck size={26} color="#10b981" />
-                    <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Dispatch Scan</Typography>
-                  </Button>
-                </Grid>
-                <Grid item xs={6}>
-                  <Button 
-                    fullWidth 
-                    variant="outlined" 
-                    onClick={() => setScreen('count')}
-                    sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
-                  >
-                    <RefreshCcw size={26} color="#64748b" />
-                    <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Cycle Count</Typography>
-                  </Button>
-                </Grid>
-              </Grid>
+          {screen === 'menu' && (() => {
+            const roleName = user?.role || 'Admin';
+            const isSuperUser = ['Admin', 'Warehouse Manager', 'Supervisor'].includes(roleName);
+            const showGRN = isSuperUser || roleName === 'GRN Operator';
+            const showASN = isSuperUser || roleName === 'GRN Operator';
+            const showPutaway = isSuperUser || roleName === 'GRN Operator';
+            const showPick = isSuperUser || roleName === 'Picker';
+            const showPack = isSuperUser || roleName === 'Packer';
+            const showDispatch = isSuperUser || roleName === 'Dispatcher';
+            const showCount = isSuperUser || roleName === 'Auditor';
+            const showTransfer = isSuperUser || roleName === 'Picker';
+            const showQC = isSuperUser || roleName === 'QC Operator';
 
-              {/* Extra Inventory Transfer Actions */}
-              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                <Button 
-                  size="small" 
-                  variant="outlined" 
-                  fullWidth 
-                  startIcon={<ArrowRightLeft size={14} />} 
-                  onClick={() => setScreen('transfer')}
-                  sx={{ textTransform: 'none', fontWeight: 700, fontSize: 11 }}
-                >
-                  Bin Stock Transfer
-                </Button>
-                <Button 
-                  size="small" 
-                  variant="outlined" 
-                  fullWidth 
-                  startIcon={<Printer size={14} />} 
-                  onClick={() => setScreen('print')}
-                  sx={{ textTransform: 'none', fontWeight: 700, fontSize: 11 }}
-                >
-                  Barcodes Cheat Sheet
-                </Button>
-              </Box>
+            return (
+              <Box sx={{ flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                <Typography variant="h5" align="center" sx={{ fontWeight: 800, mb: 1, fontSize: 16 }}>Operator Terminal</Typography>
+                <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 2, fontSize: 12 }}>
+                  Role: <strong>{roleName}</strong> ({user?.fullName || 'User'})
+                </Typography>
 
-              {loading ? (
-                <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress size={24} /></Box>
-              ) : (
-                <Box sx={{ mt: 'auto', p: 1.5, bgcolor: '#f1f5f9', borderRadius: 2, border: '1px solid #e2e8f0' }}>
-                  <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                    <Info size={12} color="#1a73e8" /> System Status
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    • Pending GRN Arrivals: <strong>{pos.length} POs</strong>
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    • Expected ASNs: <strong>{asns.length} shipments</strong>
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    • Pending Putaway Slots: <strong>{pendingPutaways.length} lines</strong>
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    • Active Picking Lists: <strong>{pickLists.length} lists</strong>
-                  </Typography>
+                <Grid container spacing={1.5} sx={{ mb: 2 }}>
+                  {showGRN && (
+                    <Grid item xs={6}>
+                      <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => setScreen('grn')}
+                        sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
+                      >
+                        <Scan size={26} color="#1a73e8" />
+                        <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>GRN Scan</Typography>
+                      </Button>
+                    </Grid>
+                  )}
+                  {showASN && (
+                    <Grid item xs={6}>
+                      <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => setScreen('asn')}
+                        sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
+                      >
+                        <Truck size={26} color="#0d9488" />
+                        <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>ASN Inbound</Typography>
+                      </Button>
+                    </Grid>
+                  )}
+                  {showPutaway && (
+                    <Grid item xs={6}>
+                      <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => setScreen('putaway')}
+                        sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
+                      >
+                        <MapPin size={26} color="#a855f7" />
+                        <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Putaway Scan</Typography>
+                      </Button>
+                    </Grid>
+                  )}
+                  {showPick && (
+                    <Grid item xs={6}>
+                      <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => setScreen('pick')}
+                        sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
+                      >
+                        <Clipboard size={26} color="#f97316" />
+                        <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Pick Scan</Typography>
+                      </Button>
+                    </Grid>
+                  )}
+                  {showPack && (
+                    <Grid item xs={6}>
+                      <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => setScreen('pack')}
+                        sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
+                      >
+                        <Package size={26} color="#ec4899" />
+                        <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Pack Scan</Typography>
+                      </Button>
+                    </Grid>
+                  )}
+                  {showDispatch && (
+                    <Grid item xs={6}>
+                      <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => setScreen('dispatch')}
+                        sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
+                      >
+                        <Truck size={26} color="#10b981" />
+                        <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Dispatch Scan</Typography>
+                      </Button>
+                    </Grid>
+                  )}
+                  {showCount && (
+                    <Grid item xs={6}>
+                      <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => setScreen('count')}
+                        sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
+                      >
+                        <RefreshCcw size={26} color="#64748b" />
+                        <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>Cycle Count</Typography>
+                      </Button>
+                    </Grid>
+                  )}
+                  {showQC && (
+                    <Grid item xs={6}>
+                      <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => setScreen('qc')}
+                        sx={{ flexDirection: 'column', py: 2.5, gap: 1, borderColor: '#cbd5e1', bgcolor: '#fff', '&:hover': { bgcolor: '#f1f5f9' }, borderRadius: 2 }}
+                      >
+                        <Check size={26} color="#059669" />
+                        <Typography variant="h6" sx={{ fontSize: 11, fontWeight: 700, color: 'text.primary' }}>QC Scan</Typography>
+                      </Button>
+                    </Grid>
+                  )}
+                </Grid>
+
+                {/* Extra Inventory Transfer Actions */}
+                <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                  {showTransfer && (
+                    <Button 
+                      size="small" 
+                      variant="outlined" 
+                      fullWidth 
+                      startIcon={<ArrowRightLeft size={14} />} 
+                      onClick={() => setScreen('transfer')}
+                      sx={{ textTransform: 'none', fontWeight: 700, fontSize: 11 }}
+                    >
+                      Bin Stock Transfer
+                    </Button>
+                  )}
+                  <Button 
+                    size="small" 
+                    variant="outlined" 
+                    fullWidth 
+                    startIcon={<Printer size={14} />} 
+                    onClick={() => setScreen('print')}
+                    sx={{ textTransform: 'none', fontWeight: 700, fontSize: 11 }}
+                  >
+                    Barcodes Cheat Sheet
+                  </Button>
                 </Box>
-              )}
-            </Box>
-          )}
+
+                {loading ? (
+                  <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress size={24} /></Box>
+                ) : (
+                  <Box sx={{ mt: 'auto', p: 1.5, bgcolor: '#f1f5f9', borderRadius: 2, border: '1px solid #e2e8f0' }}>
+                    <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                      <Info size={12} color="#1a73e8" /> System Status
+                    </Typography>
+                    {showGRN && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        • Pending GRN Arrivals: <strong>{pos.length} POs</strong>
+                      </Typography>
+                    )}
+                    {showASN && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        • Expected ASNs: <strong>{asns.length} shipments</strong>
+                      </Typography>
+                    )}
+                    {showPutaway && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        • Pending Putaway Slots: <strong>{pendingPutaways.length} lines</strong>
+                      </Typography>
+                    )}
+                    {showPick && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        • Active Picking Lists: <strong>{pickLists.length} lists</strong>
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Box>
+            );
+          })()}
 
           {/* ==================================================== */}
           {/* SCREEN: GRN SCAN WORKFLOW                            */}
@@ -2254,6 +2392,135 @@ export default function MobileHome() {
                   <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
                     <Button variant="outlined" color="error" fullWidth onClick={() => setDispatchSelectedSO(null)}>Back</Button>
                     <Button variant="contained" color="success" fullWidth onClick={submitDispatch}>Confirm Dispatch</Button>
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          )}
+
+          {/* ==================================================== */}
+          {/* SCREEN: QC INSPECTION WORKFLOW                       */}
+          {/* ==================================================== */}
+          {screen === 'qc' && (
+            <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', gap: 1.5 }}>
+              {!selectedQCGRN ? (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>Select Received GRN for QC Check:</Typography>
+                  {qcGRNs.length === 0 ? (
+                    <Alert severity="success" sx={{ py: 0 }}>All received GRNs are inspected!</Alert>
+                  ) : (
+                    <List sx={{ p: 0 }}>
+                      {qcGRNs.map(g => (
+                        <ListItem key={g.GRNId} disablePadding sx={{ mb: 1 }}>
+                          <Button 
+                            fullWidth 
+                            variant="outlined" 
+                            onClick={() => selectQCGRN(g)}
+                            sx={{ justifyContent: 'space-between', textTransform: 'none', py: 1, color: 'text.primary', borderColor: '#cbd5e1' }}
+                          >
+                            <Box sx={{ textAlign: 'left' }}>
+                              <Typography variant="body2" fontWeight={700}>{g.GRNCode}</Typography>
+                              <Typography variant="caption" color="text.secondary">PO Reference: {g.POCode || 'N/A'}</Typography>
+                            </Box>
+                            <Chip label="Inspect" size="small" color="success" />
+                          </Button>
+                        </ListItem>
+                      ))}
+                    </List>
+                  )}
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box sx={{ p: 1, bgcolor: '#f0fdf4', borderRadius: 1.5, border: '1px solid #bbf7d0' }}>
+                    <Typography variant="caption" color="text.secondary">Inspecting GRN</Typography>
+                    <Typography variant="body2" fontWeight={700}>{selectedQCGRN.GRNCode}</Typography>
+                  </Box>
+
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>Inspect Items:</Typography>
+                  <List sx={{ p: 0, maxHeight: 220, overflowY: 'auto' }}>
+                    {qcDetails.map(item => {
+                      const totalQty = item.ReceivedQty || 0;
+                      const accVal = qcAcceptedQtys[item.ItemId] ?? totalQty;
+                      const rejVal = qcRejectedQtys[item.ItemId] ?? 0;
+                      const reason = qcReasons[item.ItemId] ?? '';
+
+                      return (
+                        <ListItem key={item.ItemId} sx={{ 
+                          py: 1, px: 1, 
+                          border: '1px solid #e2e8f0', 
+                          borderRadius: 1.5, mb: 1,
+                          flexDirection: 'column',
+                          alignItems: 'stretch',
+                          bgcolor: rejVal > 0 ? '#fff1f2' : '#fff'
+                        }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                            <Typography variant="body2" fontWeight={700}>{item.ItemName} ({item.ItemCode})</Typography>
+                            <Typography variant="caption" color="text.secondary">Received: {totalQty} {item.UOM}</Typography>
+                          </Box>
+
+                          <Grid container spacing={1} alignItems="center">
+                            <Grid item xs={6}>
+                              <TextField
+                                label="Pass Qty"
+                                type="number"
+                                size="small"
+                                inputProps={{ min: 0, max: totalQty }}
+                                value={accVal}
+                                onChange={(e) => {
+                                  const val = Math.min(Math.max(0, Number(e.target.value || '0')), totalQty);
+                                  setQcAcceptedQtys(prev => ({ ...prev, [item.ItemId]: val }));
+                                  setQcRejectedQtys(prev => ({ ...prev, [item.ItemId]: totalQty - val }));
+                                }}
+                              />
+                            </Grid>
+                            <Grid item xs={6}>
+                              <TextField
+                                label="Fail Qty"
+                                type="number"
+                                size="small"
+                                inputProps={{ min: 0, max: totalQty }}
+                                value={rejVal}
+                                onChange={(e) => {
+                                  const val = Math.min(Math.max(0, Number(e.target.value || '0')), totalQty);
+                                  setQcRejectedQtys(prev => ({ ...prev, [item.ItemId]: val }));
+                                  setQcAcceptedQtys(prev => ({ ...prev, [item.ItemId]: totalQty - val }));
+                                }}
+                              />
+                            </Grid>
+                          </Grid>
+
+                          {rejVal > 0 && (
+                            <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+                              <InputLabel>Rejection Reason</InputLabel>
+                              <Select
+                                value={reason}
+                                label="Rejection Reason"
+                                onChange={(e) => setQcReasons(prev => ({ ...prev, [item.ItemId]: e.target.value }))}
+                              >
+                                <MenuItem value="Damaged Stock">Damaged Stock</MenuItem>
+                                <MenuItem value="Expired Product">Expired Product</MenuItem>
+                                <MenuItem value="Incorrect Specification">Incorrect Specification</MenuItem>
+                                <MenuItem value="Quality Defect">Quality Defect</MenuItem>
+                              </Select>
+                            </FormControl>
+                          )}
+                        </ListItem>
+                      );
+                    })}
+                  </List>
+
+                  <TextField
+                    label="Inspection Remarks"
+                    size="small"
+                    fullWidth
+                    value={qcRemarks}
+                    onChange={(e) => setQcRemarks(e.target.value)}
+                    placeholder="Enter any inspection notes..."
+                  />
+
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                    <Button variant="outlined" color="error" fullWidth onClick={() => { setSelectedQCGRN(null); setQcDetails([]); }}>Back</Button>
+                    <Button variant="contained" color="success" fullWidth onClick={submitQC}>Submit QC Result</Button>
                   </Box>
                 </Box>
               )}

@@ -7,7 +7,7 @@ import swaggerUi from 'swagger-ui-express';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import db from './config/db';
-import mssqlDb from './config/mssql';
+import mssqlDb, { requireErpConnection } from './config/mssql';
 
 // Controllers
 import { AuthController } from './interfaces/controllers/AuthController';
@@ -182,6 +182,8 @@ app.get('/api/putaway/history', authenticateJWT, requirePermission('Inbound', 'r
 
 // Inventory & Stock Transfers
 app.get('/api/inventory/stock', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getInventory);
+app.get('/api/inventory/stock-available', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getItemStockSummary);
+app.get('/api/inventory/item-bins/:itemId', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getItemBinBreakdown);
 app.get('/api/inventory/serials', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getSerialStocks);
 app.post('/api/inventory/transfer', authenticateJWT, requirePermission('Inventory', 'create'), InventoryController.transferStock);
 app.get('/api/inventory/transfers', authenticateJWT, requirePermission('Inventory', 'read'), InventoryController.getTransferHistory);
@@ -259,19 +261,19 @@ app.get('/api/notifications', authenticateJWT, requireFeature('MODULE_NOTIFICATI
 app.put('/api/notifications/:id/read', authenticateJWT, requireFeature('MODULE_NOTIFICATIONS'), NotificationController.markAsRead);
 app.post('/api/notifications/mark-all-read', authenticateJWT, requireFeature('MODULE_NOTIFICATIONS'), NotificationController.markAllRead);
 
-// ERP Sync Logs & Retry
-app.get('/api/sync/logs', authenticateJWT, requirePermission('Settings', 'read'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.getLogs);
-app.post('/api/sync/po', authenticateJWT, requirePermission('Inbound', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.syncPurchaseOrders);
-app.post('/api/sync/so', authenticateJWT, requirePermission('Outbound', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.syncSalesOrders);
-app.post('/api/sync/suppliers', authenticateJWT, requirePermission('Masters', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.syncSuppliers);
-app.post('/api/sync/customers', authenticateJWT, requirePermission('Masters', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.syncCustomers);
-app.post('/api/sync/items', authenticateJWT, requirePermission('Masters', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.syncItems);
-app.get('/api/sync/erp-items', authenticateJWT, requirePermission('Masters', 'read'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.getErpItems);
-app.get('/api/sync/erp-po', authenticateJWT, requirePermission('Inbound', 'read'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.getErpPurchaseOrders);
-app.get('/api/sync/erp-so', authenticateJWT, requirePermission('Outbound', 'read'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.getErpSalesOrders);
-app.post('/api/sync/purchase-invoices', authenticateJWT, requirePermission('Inbound', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.syncPurchaseInvoices);
-app.post('/api/sync/sales-invoices', authenticateJWT, requirePermission('Outbound', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.syncSalesInvoices);
-app.post('/api/sync/retry/:logId', authenticateJWT, requirePermission('Settings', 'update'), requireFeature('MODULE_BUSY_INTEGRATION'), SyncController.retryLog);
+// ERP Sync Routes — all guarded by requireErpConnection (blocks with 503 if Busy ERP is offline)
+app.get('/api/sync/logs',             authenticateJWT, requirePermission('Settings', 'read'),   requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.getLogs);
+app.post('/api/sync/po',              authenticateJWT, requirePermission('Inbound', 'create'),  requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.syncPurchaseOrders);
+app.post('/api/sync/so',              authenticateJWT, requirePermission('Outbound', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.syncSalesOrders);
+app.post('/api/sync/suppliers',       authenticateJWT, requirePermission('Masters', 'create'),  requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.syncSuppliers);
+app.post('/api/sync/customers',       authenticateJWT, requirePermission('Masters', 'create'),  requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.syncCustomers);
+app.post('/api/sync/items',           authenticateJWT, requirePermission('Masters', 'create'),  requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.syncItems);
+app.get('/api/sync/erp-items',        authenticateJWT, requirePermission('Masters', 'read'),    requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.getErpItems);
+app.get('/api/sync/erp-po',           authenticateJWT, requirePermission('Inbound', 'read'),   requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.getErpPurchaseOrders);
+app.get('/api/sync/erp-so',           authenticateJWT, requirePermission('Outbound', 'read'),  requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.getErpSalesOrders);
+app.post('/api/sync/purchase-invoices', authenticateJWT, requirePermission('Inbound', 'create'),  requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.syncPurchaseInvoices);
+app.post('/api/sync/sales-invoices',  authenticateJWT, requirePermission('Outbound', 'create'), requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.syncSalesInvoices);
+app.post('/api/sync/retry/:logId',    authenticateJWT, requirePermission('Settings', 'update'), requireFeature('MODULE_BUSY_INTEGRATION'), requireErpConnection, SyncController.retryLog);
 
 // Reports & Dashboard
 app.get('/api/reports/dashboard', authenticateJWT, ReportController.getDashboardStats);

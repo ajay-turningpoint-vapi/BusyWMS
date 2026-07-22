@@ -336,7 +336,16 @@ export default function Putaway() {
                         }}>
                           <ListItemIcon><MapPin size={16} color={isSelected ? '#1a73e8' : '#64748b'} /></ListItemIcon>
                           <ListItemText 
-                            primary={<Typography variant="body2" sx={{ fontWeight: 600 }}>{bin.BinCode}</Typography>}
+                            primary={
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 600 }}>{bin.BinCode}</Typography>
+                                {bin.HasExistingStock === 0 && (
+                                  <Typography variant="caption" sx={{ bgcolor: 'warning.light', color: 'warning.contrastText', px: 0.75, borderRadius: 1, fontWeight: 700, fontSize: '0.65rem' }}>
+                                    NEW BIN
+                                  </Typography>
+                                )}
+                              </Box>
+                            }
                             secondary={`Zone: ${bin.ZoneName} | Available Wt: ${bin.AvailableWeight}kg | Vol: ${bin.AvailableVolume}L${bin.MaxQtyItCanTake !== undefined ? ` (Can hold max ${bin.MaxQtyItCanTake} units)` : ''}`} 
                           />
                           {isSelected && <Check size={16} color="#1a73e8" />}

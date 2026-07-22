@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Database, ArrowDownToLine, ArrowUpFromLine, 
   ArrowRightLeft, FileSpreadsheet, Smartphone, Sun, Moon, Bell, 
   UserCircle, LogOut, ChevronRight, Menu as MenuIcon, Search,
-  ShoppingCart, Inbox, ClipboardCheck, Archive, Warehouse, 
+  ShoppingCart, Inbox, ClipboardCheck, Archive, Warehouse, Layers,
   UploadCloud, ListChecks, Package, Truck, BarChart3, Settings, Printer,
   CornerDownLeft, ListTodo, AlertTriangle, RefreshCw, ChevronDown
 } from 'lucide-react';
@@ -134,7 +134,7 @@ export default function MainLayout() {
   const [notifications, setNotifications] = useState<{id: number; text: string; time: string}[]>([]);
 
   useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: any;
     let isMounted = true;
 
     const fetchNotifications = async () => {
@@ -232,6 +232,7 @@ export default function MainLayout() {
     { text: 'Returns & Restocking', icon: <CornerDownLeft size={18} />, path: '/inbound/returns', category: 'Inbound', featureCode: 'MODULE_RETURNS' },
  
     // Stock Adjust
+    { text: 'Stock Available', icon: <Layers size={18} />, path: '/inventory/stock-available', category: 'Inventory' },
     { text: 'Stock Transfer', icon: <Warehouse size={18} />, path: '/inventory/transfer', category: 'Inventory' },
     { text: 'Replenishment Moves', icon: <RefreshCw size={18} />, path: '/inventory/replenish', category: 'Inventory', featureCode: 'MODULE_REPLENISHMENT' },
     { text: 'Cycle Counting', icon: <ListTodo size={18} />, path: '/inventory/cycle-count', category: 'Inventory' },

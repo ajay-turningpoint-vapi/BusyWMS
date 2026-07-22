@@ -280,6 +280,8 @@ CREATE TABLE tblPurchaseOrder (
     OrderDate DATETIME NOT NULL,
     DeliveryDate DATETIME DEFAULT NULL,
     PreparedBy VARCHAR(100) NULL,
+    Branch VARCHAR(100) DEFAULT NULL,        -- ERP branch/company location
+    PurType VARCHAR(100) DEFAULT NULL,       -- Purchase type (Local / Import / etc.)
     Status VARCHAR(20) DEFAULT 'PENDING' NOT NULL, -- PENDING, PARTIAL, COMPLETED, CANCELLED
     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -292,7 +294,14 @@ CREATE TABLE tblPurchaseOrderDetail (
     OrderQty DECIMAL(18,3) NOT NULL,
     ReceivedQty DECIMAL(18,3) DEFAULT 0.000 NOT NULL,
     UOM VARCHAR(20) NOT NULL,
-    UnitPrice DECIMAL(18,3) DEFAULT 0.000,
+    UnitPrice DECIMAL(18,3) DEFAULT 0.000,   -- Per-piece price (PER_PC_AMOUNT)
+    TotalAmount DECIMAL(18,3) DEFAULT 0.000, -- Line total (VALUE3)
+    MRP DECIMAL(18,3) DEFAULT 0.000,         -- Maximum Retail Price
+    DP DECIMAL(18,3) DEFAULT 0.000,          -- Dealer Price (D4)
+    PurDis DECIMAL(10,3) DEFAULT 0.000,      -- Purchase Discount % (D17)
+    DiscStr VARCHAR(100) DEFAULT NULL,       -- Discount Structure name
+    GSTRate DECIMAL(10,3) DEFAULT NULL,      -- GST Rate % (e.g. 18.0)
+    ItemGrp VARCHAR(100) DEFAULT NULL,       -- Item Group from ERP
     FOREIGN KEY (POId) REFERENCES tblPurchaseOrder(POId),
     FOREIGN KEY (ItemId) REFERENCES tblItem(ItemId)
 ) ENGINE=InnoDB;
@@ -965,21 +974,14 @@ BEGIN
     SET @ReqWeight = p_Qty * v_ItemWeight;
     SET @ReqVolume = p_Qty * v_ItemVolume;
 
-    SELECT 
-        b.BinId,
-        b.Code AS BinCode,
-        b.Barcode AS BinBarcode,
-        (b.CapacityWeight - b.OccupiedWeight) AS AvailableWeight,
-        (b.CapacityVolume - b.OccupiedVolume) AS AvailableVolume,
-        w.Name AS WarehouseName,
-        z.Name AS ZoneName,
-        IF(EXISTS(
-            SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.ItemId = p_ItemId
-        ), 1, 0) AS HasExistingStock,
+    -- Calculate total capacity in existing bins
+    SELECT COALESCE(SUM(
         FLOOR(LEAST(
             (b.CapacityWeight - b.OccupiedWeight) / v_ItemWeight,
             (b.CapacityVolume - b.OccupiedVolume) / v_ItemVolume
-        )) AS MaxQtyItCanTake
+        ))
+    ), 0)
+    INTO v_TotalExistingCapacity
     FROM tblBin b
     INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
     INNER JOIN tblRack r  ON s.RackId = r.RackId
@@ -989,16 +991,105 @@ BEGIN
       AND b.IsActive = 1
       AND (b.CapacityWeight - b.OccupiedWeight) >= v_ItemWeight
       AND (b.CapacityVolume - b.OccupiedVolume) >= v_ItemVolume
-      AND NOT EXISTS (
-          SELECT 1 
-          FROM tblInventory i2 
-          WHERE i2.BinId = b.BinId 
-            AND i2.ItemId != p_ItemId 
-            AND i2.Quantity > 0
-      )
-    ORDER BY HasExistingStock DESC,
-             (b.CapacityWeight - b.OccupiedWeight) ASC
-    LIMIT 5;
+      AND EXISTS (
+          SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.ItemId = p_ItemId
+      );
+
+    IF v_TotalExistingCapacity >= p_Qty THEN
+        -- Only return existing bins since they have enough capacity
+        SELECT 
+            b.BinId,
+            b.Code AS BinCode,
+            b.Barcode AS BinBarcode,
+            (b.CapacityWeight - b.OccupiedWeight) AS AvailableWeight,
+            (b.CapacityVolume - b.OccupiedVolume) AS AvailableVolume,
+            w.Name AS WarehouseName,
+            z.Name AS ZoneName,
+            1 AS HasExistingStock,
+            FLOOR(LEAST(
+                (b.CapacityWeight - b.OccupiedWeight) / v_ItemWeight,
+                (b.CapacityVolume - b.OccupiedVolume) / v_ItemVolume
+            )) AS MaxQtyItCanTake
+        FROM tblBin b
+        INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
+        INNER JOIN tblRack r  ON s.RackId = r.RackId
+        INNER JOIN tblZone z  ON r.ZoneId = z.ZoneId
+        INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
+        WHERE w.WarehouseId = p_PreferredWarehouseId
+          AND b.IsActive = 1
+          AND (b.CapacityWeight - b.OccupiedWeight) >= v_ItemWeight
+          AND (b.CapacityVolume - b.OccupiedVolume) >= v_ItemVolume
+          AND EXISTS (
+              SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.ItemId = p_ItemId
+          )
+        ORDER BY (b.CapacityWeight - b.OccupiedWeight) ASC
+        LIMIT 5;
+    ELSE
+        -- Return existing bins PLUS up to 2 empty bins
+        SELECT * FROM (
+            SELECT 
+                b.BinId,
+                b.Code AS BinCode,
+                b.Barcode AS BinBarcode,
+                (b.CapacityWeight - b.OccupiedWeight) AS AvailableWeight,
+                (b.CapacityVolume - b.OccupiedVolume) AS AvailableVolume,
+                w.Name AS WarehouseName,
+                z.Name AS ZoneName,
+                1 AS HasExistingStock,
+                FLOOR(LEAST(
+                    (b.CapacityWeight - b.OccupiedWeight) / v_ItemWeight,
+                    (b.CapacityVolume - b.OccupiedVolume) / v_ItemVolume
+                )) AS MaxQtyItCanTake
+            FROM tblBin b
+            INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
+            INNER JOIN tblRack r  ON s.RackId = r.RackId
+            INNER JOIN tblZone z  ON r.ZoneId = z.ZoneId
+            INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
+            WHERE w.WarehouseId = p_PreferredWarehouseId
+              AND b.IsActive = 1
+              AND (b.CapacityWeight - b.OccupiedWeight) >= v_ItemWeight
+              AND (b.CapacityVolume - b.OccupiedVolume) >= v_ItemVolume
+              AND EXISTS (
+                  SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.ItemId = p_ItemId
+              )
+            ORDER BY (b.CapacityWeight - b.OccupiedWeight) ASC
+            LIMIT 5
+        ) AS existing_stock_bins
+        
+        UNION ALL
+        
+        SELECT * FROM (
+            SELECT 
+                b.BinId,
+                b.Code AS BinCode,
+                b.Barcode AS BinBarcode,
+                (b.CapacityWeight - b.OccupiedWeight) AS AvailableWeight,
+                (b.CapacityVolume - b.OccupiedVolume) AS AvailableVolume,
+                w.Name AS WarehouseName,
+                z.Name AS ZoneName,
+                0 AS HasExistingStock,
+                FLOOR(LEAST(
+                    (b.CapacityWeight - b.OccupiedWeight) / v_ItemWeight,
+                    (b.CapacityVolume - b.OccupiedVolume) / v_ItemVolume
+                )) AS MaxQtyItCanTake
+            FROM tblBin b
+            INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
+            INNER JOIN tblRack r  ON s.RackId = r.RackId
+            INNER JOIN tblZone z  ON r.ZoneId = z.ZoneId
+            INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
+            WHERE w.WarehouseId = p_PreferredWarehouseId
+              AND b.IsActive = 1
+              AND (b.CapacityWeight - b.OccupiedWeight) >= v_ItemWeight
+              AND (b.CapacityVolume - b.OccupiedVolume) >= v_ItemVolume
+              AND NOT EXISTS (
+                  SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.Quantity > 0
+              )
+            ORDER BY (b.CapacityWeight - b.OccupiedWeight) ASC
+            LIMIT 2
+        ) AS empty_bins
+        ORDER BY HasExistingStock DESC, AvailableWeight ASC
+        LIMIT 5;
+    END IF;
 END //
 
 CREATE PROCEDURE sp_ReserveInventory(

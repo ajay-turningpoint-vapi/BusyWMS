@@ -95,24 +95,41 @@ export class MasterController {
   // ==========================================
   public static async getBins(req: AuthenticatedRequest, res: Response) {
     try {
+      const isPaginated = req.query.page !== undefined;
       const page = parseInt(req.query.page as string || '0', 10);
       const limit = parseInt(req.query.limit as string || '50', 10);
+      const q = req.query.q as string || '';
       
-      let rows;
-      if (req.query.page && req.query.limit) {
-        const offset = page * limit;
-        rows = await db.query(`
-          SELECT b.*, s.Code AS ShelfCode, r.Code AS RackCode, z.Code AS ZoneCode, w.Code AS WarehouseCode
-          FROM tblBin b
+      let fromClause = `tblBin b
           INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
           INNER JOIN tblRack r ON s.RackId = r.RackId
           INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
-          INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
+          INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId`;
+      let whereClause = '';
+      const params: any = {};
+      if (q) {
+        whereClause = 'WHERE b.Code LIKE @q OR b.Barcode LIKE @q';
+        params.q = `%${q}%`;
+      }
+      
+      if (isPaginated) {
+        const offset = page * limit;
+        params.limit = limit;
+        params.offset = offset;
+        const countQuery = `SELECT COUNT(*) AS total FROM ${fromClause} ${whereClause}`;
+        const countRows = await db.query(countQuery, params);
+        const total = countRows.length > 0 ? countRows[0].total : 0;
+
+        const rows = await db.query(`
+          SELECT b.*, s.Code AS ShelfCode, r.Code AS RackCode, z.Code AS ZoneCode, w.Code AS WarehouseCode
+          FROM ${fromClause}
+          ${whereClause}
           ORDER BY b.BinId DESC
           LIMIT @limit OFFSET @offset
-        `, { limit, offset });
+        `, params);
+        return res.json({ items: rows, total });
       } else {
-        rows = await db.query(`
+        const rows = await db.query(`
           SELECT b.*, s.Code AS ShelfCode, r.Code AS RackCode, z.Code AS ZoneCode, w.Code AS WarehouseCode
           FROM tblBin b
           INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
@@ -121,8 +138,8 @@ export class MasterController {
           INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
           ORDER BY b.BinId DESC
         `);
+        return res.json(rows);
       }
-      return res.json(rows);
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -281,14 +298,45 @@ export class MasterController {
   // ==========================================
   public static async getRacks(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query(`
-        SELECT r.*, z.Code AS ZoneCode, w.Code AS WarehouseCode, z.Name AS ZoneName, w.Name AS WarehouseName
-        FROM tblRack r
+      const isPaginated = req.query.page !== undefined;
+      const page = parseInt(req.query.page as string || '0', 10);
+      const limit = parseInt(req.query.limit as string || '50', 10);
+      const q = req.query.q as string || '';
+      
+      let fromClause = `tblRack r
         INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
-        INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId
-        ORDER BY r.RackId DESC
-      `);
-      return res.json(rows);
+        INNER JOIN tblWarehouse w ON z.WarehouseId = w.WarehouseId`;
+      let whereClause = '';
+      const params: any = {};
+      if (q) {
+        whereClause = 'WHERE r.Code LIKE @q OR r.Name LIKE @q';
+        params.q = `%${q}%`;
+      }
+      
+      if (isPaginated) {
+        const offset = page * limit;
+        params.limit = limit;
+        params.offset = offset;
+        const countQuery = `SELECT COUNT(*) AS total FROM ${fromClause} ${whereClause}`;
+        const countRows = await db.query(countQuery, params);
+        const total = countRows.length > 0 ? countRows[0].total : 0;
+        
+        const rows = await db.query(`
+          SELECT r.*, z.Code AS ZoneCode, w.Code AS WarehouseCode, z.Name AS ZoneName, w.Name AS WarehouseName
+          FROM ${fromClause}
+          ${whereClause}
+          ORDER BY r.RackId DESC
+          LIMIT @limit OFFSET @offset
+        `, params);
+        return res.json({ items: rows, total });
+      } else {
+        const rows = await db.query(`
+          SELECT r.*, z.Code AS ZoneCode, w.Code AS WarehouseCode, z.Name AS ZoneName, w.Name AS WarehouseName
+          FROM ${fromClause}
+          ORDER BY r.RackId DESC
+        `);
+        return res.json(rows);
+      }
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }
@@ -324,14 +372,45 @@ export class MasterController {
 
   public static async getShelves(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query(`
-        SELECT s.*, r.Code AS RackCode, z.Code AS ZoneCode, r.Name AS RackName
-        FROM tblShelf s
+      const isPaginated = req.query.page !== undefined;
+      const page = parseInt(req.query.page as string || '0', 10);
+      const limit = parseInt(req.query.limit as string || '50', 10);
+      const q = req.query.q as string || '';
+      
+      let fromClause = `tblShelf s
         INNER JOIN tblRack r ON s.RackId = r.RackId
-        INNER JOIN tblZone z ON r.ZoneId = z.ZoneId
-        ORDER BY s.ShelfId DESC
-      `);
-      return res.json(rows);
+        INNER JOIN tblZone z ON r.ZoneId = z.ZoneId`;
+      let whereClause = '';
+      const params: any = {};
+      if (q) {
+        whereClause = 'WHERE s.Code LIKE @q OR s.Name LIKE @q';
+        params.q = `%${q}%`;
+      }
+
+      if (isPaginated) {
+        const offset = page * limit;
+        params.limit = limit;
+        params.offset = offset;
+        const countQuery = `SELECT COUNT(*) AS total FROM ${fromClause} ${whereClause}`;
+        const countRows = await db.query(countQuery, params);
+        const total = countRows.length > 0 ? countRows[0].total : 0;
+        
+        const rows = await db.query(`
+          SELECT s.*, r.Code AS RackCode, z.Code AS ZoneCode, r.Name AS RackName, z.Name AS ZoneName
+          FROM ${fromClause}
+          ${whereClause}
+          ORDER BY s.ShelfId DESC
+          LIMIT @limit OFFSET @offset
+        `, params);
+        return res.json({ items: rows, total });
+      } else {
+        const rows = await db.query(`
+          SELECT s.*, r.Code AS RackCode, z.Code AS ZoneCode, r.Name AS RackName, z.Name AS ZoneName
+          FROM ${fromClause}
+          ORDER BY s.ShelfId DESC
+        `);
+        return res.json(rows);
+      }
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }

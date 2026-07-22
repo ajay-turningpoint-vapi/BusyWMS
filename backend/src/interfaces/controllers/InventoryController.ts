@@ -9,13 +9,28 @@ export class InventoryController {
     try {
       const page = parseInt(req.query.page as string || '0', 10);
       const limit = parseInt(req.query.limit as string || '50', 10);
+      const q = req.query.q as string || '';
+      
+      let queryStr = 'SELECT * FROM vw_InventoryStatus';
+      const params: any = {};
+      
+      if (q) {
+        queryStr += ' WHERE BinCode = @exactQ OR BinBarcode = @exactQ OR ItemCode = @exactQ OR BinCode LIKE @q OR BinBarcode LIKE @q OR ItemCode LIKE @q OR ItemName LIKE @q';
+        params.q = `%${q}%`;
+        params.exactQ = q;
+      }
+      
+      queryStr += ' ORDER BY InventoryId DESC';
       
       let rows;
       if (req.query.page && req.query.limit) {
         const offset = page * limit;
-        rows = await db.query('SELECT * FROM vw_InventoryStatus ORDER BY InventoryId DESC LIMIT @limit OFFSET @offset', { limit, offset });
+        params.limit = limit;
+        params.offset = offset;
+        queryStr += ' LIMIT @limit OFFSET @offset';
+        rows = await db.query(queryStr, params);
       } else {
-        rows = await db.query('SELECT * FROM vw_InventoryStatus ORDER BY InventoryId DESC');
+        rows = await db.query(queryStr, params);
       }
       return res.json(rows);
     } catch (err: any) {
@@ -322,4 +337,216 @@ export class InventoryController {
       return res.status(500).json({ message: err.message });
     }
   }
+
+  // Get aggregated stock per item with min/max quantities
+  public static async getItemStockSummary(req: AuthenticatedRequest, res: Response) {
+    try {
+      const page = parseInt(req.query.page as string || '0', 10);
+      const limit = parseInt(req.query.limit as string || '50', 10);
+      const q = (req.query.q as string || '').trim();
+      const inStockOnly = req.query.inStockOnly === 'true';
+
+      let whereClause = 'WHERE i.IsActive = 1';
+      const params: any = {};
+
+      if (q) {
+        whereClause += ' AND (i.Code LIKE @q OR i.Name LIKE @q OR i.Category LIKE @q OR i.Barcode LIKE @q)';
+        params.q = `%${q}%`;
+      }
+
+      let countSql = '';
+      let dataSql = '';
+      const offset = page * limit;
+      params.limit = limit;
+      params.offset = offset;
+
+      if (!q && !inStockOnly) {
+        // Fast count from tblItem index
+        const countRes = await db.query('SELECT COUNT(*) AS total FROM tblItem WHERE IsActive = 1');
+        const total = countRes[0]?.total || 0;
+
+        // Optimized query joining inventory summary subquery
+        dataSql = `
+          SELECT 
+            i.ItemId,
+            COALESCE(NULLIF(i.Alias, ''), i.Code) AS ItemCode,
+            i.Code AS ERPCode,
+            i.Name AS ItemName,
+            i.Category,
+            i.UOM,
+            COALESCE(i.MinStock, 0) AS MinStock,
+            COALESCE(i.MaxStock, 0) AS MaxStock,
+            COALESCE(invSum.TotalQuantity, 0) AS TotalQuantity,
+            COALESCE(invSum.TotalReserved, 0) AS TotalReserved,
+            COALESCE(invSum.TotalQuantity - invSum.TotalReserved, 0) AS TotalAvailable,
+            COALESCE(invSum.BinCount, 0) AS BinCount,
+            CASE 
+              WHEN COALESCE(i.MinStock, 0) > 0 AND COALESCE(invSum.TotalQuantity, 0) < i.MinStock THEN 'Below Min'
+              WHEN COALESCE(i.MaxStock, 0) > 0 AND COALESCE(i.MaxStock, 0) < 999990 AND COALESCE(invSum.TotalQuantity, 0) > i.MaxStock THEN 'Exceeds Max'
+              ELSE 'Optimal'
+            END AS StockStatus
+          FROM tblItem i
+          LEFT JOIN (
+            SELECT 
+              ItemId, 
+              SUM(Quantity) AS TotalQuantity, 
+              SUM(ReservedQty) AS TotalReserved, 
+              COUNT(DISTINCT BinId) AS BinCount 
+            FROM tblInventory 
+            GROUP BY ItemId
+          ) invSum ON i.ItemId = invSum.ItemId
+          WHERE i.IsActive = 1
+          ORDER BY invSum.TotalQuantity DESC, i.Name ASC
+          LIMIT @limit OFFSET @offset
+        `;
+
+        const items = await db.query(dataSql, params);
+        return res.json({ items, total });
+      } else if (inStockOnly && !q) {
+        // Only items present in tblInventory
+        const countRes = await db.query('SELECT COUNT(DISTINCT ItemId) AS total FROM tblInventory');
+        const total = countRes[0]?.total || 0;
+
+        dataSql = `
+          SELECT 
+            inv.ItemId,
+            COALESCE(NULLIF(i.Alias, ''), i.Code) AS ItemCode,
+            i.Code AS ERPCode,
+            i.Name AS ItemName,
+            i.Category,
+            i.UOM,
+            COALESCE(i.MinStock, 0) AS MinStock,
+            COALESCE(i.MaxStock, 0) AS MaxStock,
+            SUM(inv.Quantity) AS TotalQuantity,
+            SUM(inv.ReservedQty) AS TotalReserved,
+            SUM(inv.Quantity - inv.ReservedQty) AS TotalAvailable,
+            COUNT(DISTINCT inv.BinId) AS BinCount,
+            CASE 
+              WHEN COALESCE(i.MinStock, 0) > 0 AND SUM(inv.Quantity) < i.MinStock THEN 'Below Min'
+              WHEN COALESCE(i.MaxStock, 0) > 0 AND COALESCE(i.MaxStock, 0) < 999990 AND SUM(inv.Quantity) > i.MaxStock THEN 'Exceeds Max'
+              ELSE 'Optimal'
+            END AS StockStatus
+          FROM tblInventory inv
+          INNER JOIN tblItem i ON inv.ItemId = i.ItemId
+          WHERE i.IsActive = 1
+          GROUP BY inv.ItemId, i.Code, i.Alias, i.Name, i.Category, i.UOM, i.MinStock, i.MaxStock
+          ORDER BY TotalQuantity DESC
+          LIMIT @limit OFFSET @offset
+        `;
+
+        const items = await db.query(dataSql, params);
+        return res.json({ items, total });
+      } else {
+        // Search query filter applied
+        let whereClause = 'WHERE i.IsActive = 1';
+        if (q) {
+          whereClause += ' AND (i.Code LIKE @q OR i.Alias LIKE @q OR i.Name LIKE @q OR i.Category LIKE @q OR i.Barcode LIKE @q)';
+          params.q = `%${q}%`;
+        }
+
+        let havingClause = '';
+        if (inStockOnly) {
+          havingClause = ' HAVING TotalQuantity > 0';
+        }
+
+        countSql = `
+          SELECT COUNT(*) AS total FROM (
+            SELECT i.ItemId, COALESCE(SUM(inv.Quantity), 0) AS TotalQuantity
+            FROM tblItem i
+            LEFT JOIN tblInventory inv ON i.ItemId = inv.ItemId
+            ${whereClause}
+            GROUP BY i.ItemId
+            ${havingClause}
+          ) t
+        `;
+        const countRes = await db.query(countSql, params);
+        const total = countRes[0]?.total || 0;
+
+        dataSql = `
+          SELECT 
+            i.ItemId,
+            COALESCE(NULLIF(i.Alias, ''), i.Code) AS ItemCode,
+            i.Code AS ERPCode,
+            i.Name AS ItemName,
+            i.Category,
+            i.UOM,
+            COALESCE(i.MinStock, 0) AS MinStock,
+            COALESCE(i.MaxStock, 0) AS MaxStock,
+            COALESCE(SUM(inv.Quantity), 0) AS TotalQuantity,
+            COALESCE(SUM(inv.ReservedQty), 0) AS TotalReserved,
+            COALESCE(SUM(inv.Quantity - inv.ReservedQty), 0) AS TotalAvailable,
+            COUNT(DISTINCT inv.BinId) AS BinCount,
+            CASE 
+              WHEN COALESCE(i.MinStock, 0) > 0 AND COALESCE(SUM(inv.Quantity), 0) < i.MinStock THEN 'Below Min'
+              WHEN COALESCE(i.MaxStock, 0) > 0 AND COALESCE(i.MaxStock, 0) < 999990 AND COALESCE(SUM(inv.Quantity), 0) > i.MaxStock THEN 'Exceeds Max'
+              ELSE 'Optimal'
+            END AS StockStatus
+          FROM tblItem i
+          LEFT JOIN tblInventory inv ON i.ItemId = inv.ItemId
+          ${whereClause}
+          GROUP BY i.ItemId, i.Code, i.Alias, i.Name, i.Category, i.UOM, i.MinStock, i.MaxStock
+          ${havingClause}
+          ORDER BY TotalQuantity DESC, i.Name ASC
+          LIMIT @limit OFFSET @offset
+        `;
+
+        const items = await db.query(dataSql, params);
+        return res.json({ items, total });
+      }
+    } catch (err: any) {
+      console.error('Failed to get item stock summary:', err);
+      return res.status(500).json({ message: err.message });
+    }
+  }
+
+  // Get bin breakdown for a specific item
+  public static async getItemBinBreakdown(req: AuthenticatedRequest, res: Response) {
+    const { itemId } = req.params;
+
+    if (!itemId) {
+      return res.status(400).json({ message: 'ItemId is required' });
+    }
+
+    try {
+      const itemInfo = await db.query(`
+        SELECT ItemId, COALESCE(NULLIF(Alias, ''), Code) AS ItemCode, Code AS ERPCode, Name AS ItemName, UOM, COALESCE(MinStock, 0) AS MinStock, COALESCE(MaxStock, 0) AS MaxStock
+        FROM tblItem WHERE ItemId = @itemId
+      `, { itemId });
+
+      if (itemInfo.length === 0) {
+        return res.status(404).json({ message: 'Item not found' });
+      }
+
+      const binRows = await db.query(`
+        SELECT 
+          inv.InventoryId,
+          w.Code AS WarehouseCode,
+          w.Name AS WarehouseName,
+          z.Code AS ZoneCode,
+          b.BinId,
+          b.Code AS BinCode,
+          inv.Quantity,
+          inv.ReservedQty,
+          (inv.Quantity - inv.ReservedQty) AS AvailableQty,
+          batch.BatchNumber,
+          batch.ExpiryDate
+        FROM tblInventory inv
+        INNER JOIN tblWarehouse w ON inv.WarehouseId = w.WarehouseId
+        INNER JOIN tblZone z ON inv.ZoneId = z.ZoneId
+        INNER JOIN tblBin b ON inv.BinId = b.BinId
+        LEFT JOIN tblBatch batch ON inv.BatchId = batch.BatchId
+        WHERE inv.ItemId = @itemId
+        ORDER BY inv.Quantity DESC, b.Code ASC
+      `, { itemId });
+
+      return res.json({
+        item: itemInfo[0],
+        bins: binRows
+      });
+    } catch (err: any) {
+      console.error('Failed to get item bin breakdown:', err);
+      return res.status(500).json({ message: err.message });
+    }
+  }
 }
+

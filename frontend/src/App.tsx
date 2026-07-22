@@ -16,6 +16,7 @@ import Putaway from './pages/Inbound/Putaway';
 import ASNList from './pages/Inbound/ASNList';
 import CreateEditASN from './pages/Inbound/CreateEditASN';
 import ASNDashboard from './pages/Inbound/ASNDashboard';
+import StockAvailable from './pages/Inventory/StockAvailable';
 import Transfer from './pages/Inventory/Transfer';
 import CycleCounts from './pages/Inventory/CycleCounts';
 import Damages from './pages/Inventory/Damages';
@@ -69,6 +70,7 @@ export default function App() {
               <Route path="inbound/asn/edit/:id" element={<CreateEditASN />} />
               <Route path="inbound/asn/dashboard" element={<ASNDashboard />} />
               <Route path="inbound/returns" element={<Returns />} />
+              <Route path="inventory/stock-available" element={<StockAvailable />} />
               <Route path="inventory/transfer" element={<Transfer />} />
               <Route path="inventory/cycle-count" element={<CycleCounts />} />
               <Route path="inventory/damages" element={<Damages />} />

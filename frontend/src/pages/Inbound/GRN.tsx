@@ -18,6 +18,7 @@ export default function GRN() {
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [invoiceNo, setInvoiceNo] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState('');
   
   // Barcode scanning / Printing state
   const [printOpen, setPrintOpen] = useState(false);
@@ -131,6 +132,16 @@ export default function GRN() {
       return;
     }
 
+    if (invoiceNo.length > 15) {
+      setError('Supplier Invoice Reference must not exceed 15 characters');
+      return;
+    }
+
+    if (!invoiceDate) {
+      setError('Invoice date is required');
+      return;
+    }
+
     // BUG-004 FIX: Validate serials BEFORE .map() so errors are caught correctly
     // A throw inside .map() doesn't propagate to the surrounding async try/catch
     const validationErrors: string[] = [];
@@ -180,6 +191,7 @@ export default function GRN() {
       const payload = {
         poId: selectedPOId,
         invoiceNo,
+        invoiceDate,
         items: itemsPayload
       };
       
@@ -203,6 +215,8 @@ export default function GRN() {
       setSelectedPO(null);
       setPoDetails([]);
       setPoSearchQuery('');
+      setInvoiceNo('');
+      setInvoiceDate('');
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'GRN saving failed');
     }
@@ -430,15 +444,30 @@ export default function GRN() {
               fullWidth
             />
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={3}>
             <TextField
               label="Supplier Invoice Reference"
               required
-              error={!invoiceNo}
+              error={!invoiceNo || invoiceNo.length > 15}
+              helperText={invoiceNo.length > 15 ? 'Max 15 characters allowed' : ''}
+              inputProps={{ maxLength: 15 }}
               size="small"
               fullWidth
               value={invoiceNo}
               onChange={(e) => setInvoiceNo(e.target.value)}
+            />
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <TextField
+              label="Supplier Invoice Date"
+              type="date"
+              required
+              error={!invoiceDate}
+              size="small"
+              fullWidth
+              value={invoiceDate}
+              onChange={(e) => setInvoiceDate(e.target.value)}
+              InputLabelProps={{ shrink: true }}
             />
           </Grid>
         </Grid>

@@ -28,9 +28,29 @@ export class PutawayController {
       const bins = await db.executeSp('sp_AllocateBinForPutaway', {
         ItemId: itemId,
         Qty: quantity,
-        PreferredWarehouseId: warehouseId || req.user?.warehouseId || 1
+        PreferredWarehouseId: warehouseId || req.user?.warehouseId || 6
       });
-      return res.json(bins);
+      
+      const enrichedBins = [];
+      for (const bin of bins) {
+        const pathRows = await db.query(`
+          SELECT s.Name AS ShelfName, r.Name AS RackName
+          FROM tblBin b
+          INNER JOIN tblShelf s ON b.ShelfId = s.ShelfId
+          INNER JOIN tblRack r ON s.RackId = r.RackId
+          WHERE b.BinId = @binId
+        `, { binId: bin.BinId || bin.binId });
+        
+        if (pathRows.length > 0) {
+          bin.ShelfName = pathRows[0].ShelfName;
+          bin.RackName = pathRows[0].RackName;
+        } else {
+          bin.ShelfName = '';
+          bin.RackName = '';
+        }
+        enrichedBins.push(bin);
+      }
+      return res.json(enrichedBins);
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
     }

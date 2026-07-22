@@ -63,6 +63,18 @@ export default function Masters() {
   const [racks, setRacks] = useState<any[]>([]);
   const [shelves, setShelves] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
+  const [racksPageData, setRacksPageData] = useState<any[]>([]);
+  const [racksTotalCount, setRacksTotalCount] = useState(0);
+  const [racksLoading, setRacksLoading] = useState(false);
+
+  const [shelvesPageData, setShelvesPageData] = useState<any[]>([]);
+  const [shelvesTotalCount, setShelvesTotalCount] = useState(0);
+  const [shelvesLoading, setShelvesLoading] = useState(false);
+
+  const [binsPageData, setBinsPageData] = useState<any[]>([]);
+  const [binsTotalCount, setBinsTotalCount] = useState(0);
+  const [binsLoading, setBinsLoading] = useState(false);
+
   const [itemsPageData, setItemsPageData] = useState<any[]>([]);
   const [itemsTotalCount, setItemsTotalCount] = useState(0);
   const [itemsLoading, setItemsLoading] = useState(false);
@@ -138,6 +150,51 @@ export default function Masters() {
     }
   };
 
+  const fetchRacks = (page: number, limit: number, search: string) => {
+    setRacksLoading(true);
+    api.get(`/masters/racks?page=${page}&limit=${limit}&q=${encodeURIComponent(search)}`)
+      .then((res) => {
+        setRacksPageData(res.data.items || []);
+        setRacksTotalCount(res.data.total || 0);
+        setRacksLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        toast.showError('Failed to load racks.');
+        setRacksLoading(false);
+      });
+  };
+
+  const fetchShelves = (page: number, limit: number, search: string) => {
+    setShelvesLoading(true);
+    api.get(`/masters/shelves?page=${page}&limit=${limit}&q=${encodeURIComponent(search)}`)
+      .then((res) => {
+        setShelvesPageData(res.data.items || []);
+        setShelvesTotalCount(res.data.total || 0);
+        setShelvesLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        toast.showError('Failed to load shelves.');
+        setShelvesLoading(false);
+      });
+  };
+
+  const fetchBins = (page: number, limit: number, search: string) => {
+    setBinsLoading(true);
+    api.get(`/masters/bins?page=${page}&limit=${limit}&q=${encodeURIComponent(search)}`)
+      .then((res) => {
+        setBinsPageData(res.data.items || []);
+        setBinsTotalCount(res.data.total || 0);
+        setBinsLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        toast.showError('Failed to load bins.');
+        setBinsLoading(false);
+      });
+  };
+
   const fetchItems = (page: number, limit: number, search: string) => {
     setItemsLoading(true);
     api.get(`/masters/items?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`)
@@ -177,9 +234,6 @@ export default function Masters() {
     setLoading(true);
     let endpoint = '/masters/warehouses';
     if (index === 1) endpoint = '/masters/zones';
-    if (index === 2) endpoint = '/masters/racks';
-    if (index === 3) endpoint = '/masters/shelves';
-    if (index === 4) endpoint = '/masters/bins';
     if (index === 5) endpoint = '/masters/items?inBinsOnly=true';
     if (index === 8) endpoint = '/masters/users';
 
@@ -197,7 +251,16 @@ export default function Masters() {
   useEffect(() => {
     setSearchInput('');
     setSearchQuery('');
-    if (tabValue === 5) {
+    if (tabValue === 2) {
+      pagination.resetPage();
+      fetchRacks(0, pagination.rowsPerPage, '');
+    } else if (tabValue === 3) {
+      pagination.resetPage();
+      fetchShelves(0, pagination.rowsPerPage, '');
+    } else if (tabValue === 4) {
+      pagination.resetPage();
+      fetchBins(0, pagination.rowsPerPage, '');
+    } else if (tabValue === 5) {
       pagination.resetPage();
       fetchItems(0, pagination.rowsPerPage, '');
     } else if (tabValue === 6) {
@@ -213,7 +276,13 @@ export default function Masters() {
   }, [tabValue]);
 
   useEffect(() => {
-    if (tabValue === 5) {
+    if (tabValue === 2) {
+      fetchRacks(pagination.page, pagination.rowsPerPage, searchQuery);
+    } else if (tabValue === 3) {
+      fetchShelves(pagination.page, pagination.rowsPerPage, searchQuery);
+    } else if (tabValue === 4) {
+      fetchBins(pagination.page, pagination.rowsPerPage, searchQuery);
+    } else if (tabValue === 5) {
       fetchItems(pagination.page, pagination.rowsPerPage, searchQuery);
     } else if (tabValue === 6) {
       fetchCustomers(pagination.page, pagination.rowsPerPage, searchQuery);
@@ -524,7 +593,7 @@ export default function Masters() {
   };
 
   const filteredData = useMemo(() => {
-    if (tabValue === 5 || tabValue === 6 || tabValue === 7) return []; // Managed server-side
+    if (tabValue >= 2 && tabValue <= 7) return []; // Managed server-side
     if (!searchQuery) return data;
     const query = searchQuery.toLowerCase();
     return data.filter((row: any) => {
@@ -534,7 +603,15 @@ export default function Masters() {
     });
   }, [data, searchQuery, tabValue]);
 
-  const paginatedData = pagination.paginate(filteredData);
+  let paginatedData = pagination.paginate(filteredData);
+  if (tabValue === 2) paginatedData = racksPageData;
+  if (tabValue === 3) paginatedData = shelvesPageData;
+  if (tabValue === 4) paginatedData = binsPageData;
+
+  let currentLoading = loading;
+  if (tabValue === 2) currentLoading = racksLoading;
+  if (tabValue === 3) currentLoading = shelvesLoading;
+  if (tabValue === 4) currentLoading = binsLoading;
 
   const handleExportCSV = () => {
     let headers: { key: string; header: string }[] = [];
@@ -605,6 +682,9 @@ export default function Masters() {
       headers = [{ key: 'UserId', header: 'User ID' }, { key: 'Username', header: 'Username' }, { key: 'FullName', header: 'Full Name' }, { key: 'Email', header: 'Email' }, { key: 'RoleName', header: 'Role' }];
     }
     const exportData = 
+      tabValue === 2 ? racksPageData :
+      tabValue === 3 ? shelvesPageData :
+      tabValue === 4 ? binsPageData :
       tabValue === 5 ? itemsPageData : 
       tabValue === 6 ? customersPageData : 
       tabValue === 7 ? suppliersPageData : 
@@ -974,7 +1054,7 @@ export default function Masters() {
                     ))
                   )
                 ) : (
-                  loading ? (
+                  currentLoading ? (
                     <TableRow>
                       <TableCell colSpan={8} align="center" sx={{ py: 5 }}>
                         <CircularProgress size={24} />
@@ -1105,8 +1185,11 @@ export default function Masters() {
                     ))
                   )
                 )}
-                {(!itemsLoading && !customersLoading && !suppliersLoading && !loading && 
-                  (tabValue === 5 ? itemsPageData : 
+                {(!itemsLoading && !customersLoading && !suppliersLoading && !currentLoading && 
+                  (tabValue === 2 ? racksPageData :
+                   tabValue === 3 ? shelvesPageData :
+                   tabValue === 4 ? binsPageData :
+                   tabValue === 5 ? itemsPageData : 
                    tabValue === 6 ? customersPageData : 
                    tabValue === 7 ? suppliersPageData : 
                    filteredData).length === 0) && (
@@ -1127,6 +1210,9 @@ export default function Masters() {
         </TableContainer>
         <TablePaginationBar
           count={
+            tabValue === 2 ? racksTotalCount :
+            tabValue === 3 ? shelvesTotalCount :
+            tabValue === 4 ? binsTotalCount :
             tabValue === 5 ? itemsTotalCount : 
             tabValue === 6 ? customersTotalCount : 
             tabValue === 7 ? suppliersTotalCount : 

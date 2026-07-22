@@ -530,13 +530,17 @@ export class SyncController {
 
               await tx.executeCmd(`
                 UPDATE tblPurchaseOrder 
-                SET VendorName = @VendorName, VendorCode = @VendorCode, OrderDate = @OrderDate, PreparedBy = @PreparedBy, UpdatedAt = CURRENT_TIMESTAMP
+                SET VendorName = @VendorName, VendorCode = @VendorCode, OrderDate = @OrderDate,
+                    PreparedBy = @PreparedBy, Branch = @Branch, PurType = @PurType,
+                    UpdatedAt = CURRENT_TIMESTAMP
                 WHERE POId = @poId
               `, {
                 VendorName: po.VendorName,
                 VendorCode: po.VendorCode,
                 OrderDate: po.OrderDate,
                 PreparedBy: po.PreparedBy || null,
+                Branch: po.Branch || null,
+                PurType: po.PurType || null,
                 poId
               });
 
@@ -544,29 +548,42 @@ export class SyncController {
               resolvedPOId = poId;
             } else {
               const poRes = await tx.executeCmd(`
-                INSERT INTO tblPurchaseOrder (POCode, VendorName, VendorCode, OrderDate, PreparedBy, Status)
-                VALUES (@POCode, @VendorName, @VendorCode, @OrderDate, @PreparedBy, 'PENDING')
+                INSERT INTO tblPurchaseOrder (POCode, VendorName, VendorCode, OrderDate, PreparedBy, Branch, PurType, Status)
+                VALUES (@POCode, @VendorName, @VendorCode, @OrderDate, @PreparedBy, @Branch, @PurType, 'PENDING')
               `, {
                 POCode: po.POCode,
                 VendorName: po.VendorName,
                 VendorCode: po.VendorCode,
                 OrderDate: po.OrderDate,
-                PreparedBy: po.PreparedBy || null
+                PreparedBy: po.PreparedBy || null,
+                Branch: po.Branch || null,
+                PurType: po.PurType || null
               });
               
               resolvedPOId = poRes.lastID!;
             }
 
             for (const item of validation.cleanedItems!) {
+              // Find the original PO item to get the extended fields from ERP
+              const erpItem = po.Items ? po.Items.find((i: any) => i.ItemCode === item.ItemCode) : null;
               await tx.executeCmd(`
-                INSERT INTO tblPurchaseOrderDetail (POId, ItemId, OrderQty, ReceivedQty, UOM, UnitPrice)
-                VALUES (@POId, @ItemId, @OrderQty, 0.0, @UOM, @UnitPrice)
+                INSERT INTO tblPurchaseOrderDetail
+                  (POId, ItemId, OrderQty, ReceivedQty, UOM, UnitPrice, TotalAmount, MRP, DP, PurDis, DiscStr, GSTRate, ItemGrp)
+                VALUES
+                  (@POId, @ItemId, @OrderQty, 0.0, @UOM, @UnitPrice, @TotalAmount, @MRP, @DP, @PurDis, @DiscStr, @GSTRate, @ItemGrp)
               `, {
                 POId: resolvedPOId,
                 ItemId: item.ItemId,
                 OrderQty: item.OrderQty,
                 UOM: item.UOM,
-                UnitPrice: item.UnitPrice
+                UnitPrice: item.UnitPrice,
+                TotalAmount: erpItem?.TotalAmount || 0,
+                MRP: erpItem?.MRP || 0,
+                DP: erpItem?.DP || 0,
+                PurDis: erpItem?.PurDis || 0,
+                DiscStr: erpItem?.DiscStr || null,
+                GSTRate: erpItem?.GSTRate ?? null,
+                ItemGrp: erpItem?.ItemGrp || null
               });
 
               // Check if incoming PO item exceeds MaxStock limit
@@ -1095,62 +1112,90 @@ export class SyncController {
     const pool = mssqlDb.getPool();
     const query = `
       SELECT 
-          TRAN3.SRNO,
-          TRAN3.VCHCODE,
-          TRY_CONVERT(DATETIME, V.OF2, 113) AS DELIVERYDATE,
-          T.DATE AS DATE,
-          T.VCHNO AS VCHNO,
-          (SELECT NAME FROM MASTER1 P WHERE P.CODE = TRAN3.MASTERCODE2) AS PARTYNAME,
-          TRAN3.MASTERCODE2 AS PARTY_CODE,
-          TRAN3.MASTERCODE1 AS ITEM_ERP_CODE,
-          M.NAME AS ITEMNAME,
-          M.ALIAS,
-          (SELECT USERNAME FROM CHECKLIST C WHERE C.CODE = T.VCHCODE AND C.TYPE = 2 AND C.ACTION = 1) AS ORDERBY,
-          (SELECT NAME FROM MASTER1 M1 WHERE convert(varchar(30), CODE) = V.OF4) AS SALESINC,
-          S.NAME AS SALESMAN,
-          ABS(T.D1) AS QTY,
-          (
-              SELECT ABS(SUM(VALUE1))
-              FROM TRAN3 T31
-              WHERE T31.REFCODE = TRAN3.REFCODE
-                AND T31.RECTYPE = 4
-          ) AS PENDINGQTY,
-          (SELECT NAME FROM MASTER1 U WHERE U.CODE = M.CM1) AS UNITS,
-          M.D2 AS MRP,
-          (CASE WHEN (TRY_CONVERT(FLOAT, SUBSTRING(M.C3, 1, 5))) > 0 THEN M.C3 ELSE M.D16 END) AS PURCHASEDIS,
-          T.C1 AS VCHDIS,
-          ABS(T.D6) AS LISTPRICE,
-          T.D5 AS AMOUNT,
-          (ABS(T.D6) * (SELECT ABS(SUM(VALUE1)) FROM TRAN3 T31 WHERE T31.REFCODE = TRAN3.REFCODE)) AS PAMT
-      FROM Tran3, MASTER1 M, TRAN2 T, VCHOTHERINFO V, MASTER1 S 
+          TRAN2.DATE AS VOUCHER_DATE,
+          C.ActionTime,
+          C.USERNAME AS PREPARED_BY,
+
+          (SELECT NAME FROM MASTER1 T WHERE T.CODE = TRAN2.MASTERCODE2) AS BRANCH,
+
+          TRAN2.VCHNO AS VOU_NO,
+
+          (SELECT NAME FROM MASTER1 WHERE CODE = TRAN2.CM1) AS PARTY,
+
+          (SELECT ALIAS FROM MASTER1 WHERE CODE = TRAN2.MASTERCODE1) AS ALIAS,
+
+          (SELECT NAME FROM MASTER1 U 
+           WHERE U.CODE = TRAN2.MASTERCODE1 AND U.MASTERTYPE = 6) AS ITEM_NAME,
+
+          (SELECT NAME FROM MASTER1 M WHERE M.CODE = ITEM.PARENTGRP) AS ITEM_GRP,
+
+          ABS(TRAN2.D1) AS QTY,
+
+          (SELECT NAME FROM MASTER1 WHERE CODE = TRAN2.CM2) AS UNITS,
+
+          TRAN2.VALUE3 AS TOTAL_AMOUNT,
+
+          CASE 
+              WHEN TRAN2.D1 = 0 THEN NULL 
+              ELSE (TRAN2.VALUE3 / ABS(TRAN2.D1)) 
+          END AS PER_PC_AMOUNT,
+
+          ITEM.D2 AS MRP,
+
+          (SELECT NAME 
+           FROM MASTER1 
+           WHERE CODE IN (
+               SELECT TOP 1 CM1 
+               FROM MASTERSUPPORT MS 
+               WHERE MS.MASTERCODE = TRAN2.MASTERCODE1
+           )) AS DISC_STR,
+
+          ITEM.D4 AS DP,
+          ITEM.D17 AS PUR_DIS,
+
+          (SELECT TOP 1 RIGHT(NAME,3) 
+           FROM MASTER1 
+           WHERE CODE = (
+               SELECT TOP 1 CM8 FROM MASTER1 WHERE CODE = ITEM.CODE
+           )) AS GST_RATE,
+
+          (SELECT TOP 1 NAME 
+           FROM MASTER1 
+           WHERE CODE = (
+               SELECT TOP 1 T.CM1 
+               FROM TRAN1 T 
+               WHERE VCHCODE = TRAN2.VCHCODE
+           )) AS PUR_TYPE,
+
+          TRAN2.MASTERCODE1 AS ITEM_ERP_CODE
+
+      FROM TRAN2
+
+      INNER JOIN MASTER1 ITEM 
+          ON ITEM.CODE = TRAN2.MASTERCODE1
+         AND ITEM.MASTERTYPE = 6
+
+      INNER JOIN MASTER1 P 
+          ON P.CODE = TRAN2.CM1
+         AND P.MASTERTYPE = 2
+
+      INNER JOIN VCHOTHERINFO V 
+          ON V.VCHCODE = TRAN2.VCHCODE
+
+      INNER JOIN CHECKLIST C 
+          ON C.CODE = TRAN2.VCHCODE
+         AND C.TYPE = 2
+         AND C.ACTION = 1
+
       WHERE 
-          Tran3.method = 1 
-          AND M.CODE = TRAN3.MASTERCODE1 
-          AND M.MASTERTYPE = 6 
-          AND T.MASTERCODE1 = M.CODE 
-          AND V.VCHCODE = T.VCHCODE 
-          AND TRAN3.VCHCODE = V.VCHCODE 
-          AND S.CODE = V.OF3
-          AND T.DATE >= @startdate 
-          AND T.DATE <= @enddate
-          AND T.VCHTYPE = 13 
-          AND TRAN3.VCHTYPE = 13 
-          AND TRAN3.refcode IN (SELECT refcode FROM TRAN3 t32 WHERE t32.rectype = 4 GROUP BY t32.refcode) 
-          AND (
-              (SELECT NAME FROM MASTER1 U WHERE U.CODE = M.CM1) IS NULL
-              OR (
-                  (SELECT NAME FROM MASTER1 U WHERE U.CODE = M.CM1) != 'N.A.'
-                  AND (SELECT NAME FROM MASTER1 U WHERE U.CODE = M.CM1) != 'N/A'
-              )
-          )
-          AND (
-              SELECT ABS(SUM(VALUE1))
-              FROM TRAN3 T31
-              WHERE T31.REFCODE = TRAN3.REFCODE
-                AND T31.RECTYPE = 4
-          ) > 0
+          TRAN2.VCHTYPE = 13
+          AND TRAN2.TRANTYPE IN (0,3)
+          AND TRAN2.DATE >= @startdate
+          AND TRAN2.DATE <= @enddate
+
       ORDER BY 
-          TRY_CONVERT(DATETIME, V.OF2, 113) DESC
+          TRAN2.DATE DESC,
+          TRAN2.VCHNO ASC
     `;
 
     const start = new Date(startDateParam);
@@ -1165,35 +1210,48 @@ export class SyncController {
 
     const poMap = new Map<string, any>();
     for (const row of result.recordset) {
-      const vouNo = row.VCHNO ? String(row.VCHNO).trim() : '';
+      const vouNo = row.VOU_NO ? String(row.VOU_NO).trim() : '';
       if (!vouNo) continue;
-      
-      const vendorName = row.PARTYNAME ? String(row.PARTYNAME).trim() : '';
-      const vendorCode = row.PARTY_CODE ? String(row.PARTY_CODE).trim() : vendorName;
-      const itemCode = row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : (row.ALIAS ? String(row.ALIAS).trim() : '');
+
+      const vendorName = row.PARTY ? String(row.PARTY).trim() : '';
+      const alias = row.ALIAS ? String(row.ALIAS).trim() : null;
+      // ItemCode: use ALIAS (barcode/SKU) if available, else fall back to ITEM_ERP_CODE
+      const itemCode = alias || (row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : '');
       if (!itemCode) continue;
 
       if (!poMap.has(vouNo)) {
         poMap.set(vouNo, {
           POCode: vouNo,
           VendorName: vendorName,
-          VendorCode: vendorCode,
-          OrderDate: row.DATE ? new Date(row.DATE).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-          PreparedBy: row.ORDERBY ? String(row.ORDERBY).trim() : null,
-          DeliveryDate: row.DELIVERYDATE ? new Date(row.DELIVERYDATE).toISOString().slice(0, 10) : null,
+          VendorCode: vendorName,                                           // used to resolve tblSupplier
+          Branch: row.BRANCH ? String(row.BRANCH).trim() : null,           // NEW: branch/location
+          OrderDate: row.VOUCHER_DATE ? new Date(row.VOUCHER_DATE).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+          PreparedBy: row.PREPARED_BY ? String(row.PREPARED_BY).trim() : null,
+          ActionTime: row.ActionTime ? new Date(row.ActionTime).toISOString() : null,
+          PurType: row.PUR_TYPE ? String(row.PUR_TYPE).trim() : null,      // NEW: Purchase Type (Local/Import/etc.)
+          DeliveryDate: null,
           Items: []
         });
       }
 
+      const gstRaw = row.GST_RATE ? String(row.GST_RATE).trim() : null;
+      const gstRate = gstRaw ? parseFloat(gstRaw) || null : null;
+
       poMap.get(vouNo).Items.push({
-        ItemCode: itemCode,
-        Alias: row.ALIAS ? String(row.ALIAS).trim() : null,
-        ItemName: row.ITEMNAME ? String(row.ITEMNAME).trim() : itemCode,
-        ItemGrp: 'General',
-        HSNCode: null,
-        OrderQty: Math.abs(row.QTY || 0),
-        UOM: row.UNITS ? String(row.UNITS).trim() : 'PCS',
-        UnitPrice: row.LISTPRICE || (row.QTY > 0 ? (row.AMOUNT / row.QTY) : 0) || 0
+        ItemCode:      itemCode,
+        Alias:         alias,
+        ItemName:      row.ITEM_NAME ? String(row.ITEM_NAME).trim() : itemCode,
+        ItemGrp:       row.ITEM_GRP ? String(row.ITEM_GRP).trim() : 'General',  // NEW: item group
+        OrderQty:      Math.abs(row.QTY || 0),
+        UOM:           row.UNITS ? String(row.UNITS).trim() : 'PCS',
+        TotalAmount:   row.TOTAL_AMOUNT || 0,                              // NEW: line total
+        UnitPrice:     row.PER_PC_AMOUNT || 0,                             // NEW: per-piece amount
+        MRP:           row.MRP || 0,                                       // NEW: maximum retail price
+        DP:            row.DP || 0,                                        // NEW: dealer price
+        PurDis:        row.PUR_DIS || 0,                                   // NEW: purchase discount %
+        DiscStr:       row.DISC_STR ? String(row.DISC_STR).trim() : null,  // NEW: discount structure name
+        GSTRate:       gstRate,                                             // NEW: GST rate %
+        HSNCode:       null
       });
     }
 
