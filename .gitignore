@@ -46,4 +46,4 @@ pnpm-debug.log*
 *.swp
 
 # Mobile App
-mobile-app/
+mobile/
