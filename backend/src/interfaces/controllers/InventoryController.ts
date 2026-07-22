@@ -396,7 +396,14 @@ export class InventoryController {
             GROUP BY ItemId
           ) invSum ON i.ItemId = invSum.ItemId
           WHERE i.IsActive = 1
-          ORDER BY invSum.TotalQuantity DESC, i.Name ASC
+          ORDER BY 
+            CASE 
+              WHEN COALESCE(i.MinStock, 0) > 0 AND COALESCE(invSum.TotalQuantity, 0) < i.MinStock THEN 1
+              WHEN COALESCE(i.MaxStock, 0) > 0 AND COALESCE(i.MaxStock, 0) < 999990 AND COALESCE(invSum.TotalQuantity, 0) > i.MaxStock THEN 1
+              ELSE 2
+            END ASC,
+            invSum.TotalQuantity DESC, 
+            i.Name ASC
           LIMIT @limit OFFSET @offset
         `;
 
@@ -430,7 +437,13 @@ export class InventoryController {
           INNER JOIN tblItem i ON inv.ItemId = i.ItemId
           WHERE i.IsActive = 1
           GROUP BY inv.ItemId, i.Code, i.Alias, i.Name, i.Category, i.UOM, i.MinStock, i.MaxStock
-          ORDER BY TotalQuantity DESC
+          ORDER BY 
+            CASE 
+              WHEN COALESCE(i.MinStock, 0) > 0 AND SUM(inv.Quantity) < i.MinStock THEN 1
+              WHEN COALESCE(i.MaxStock, 0) > 0 AND COALESCE(i.MaxStock, 0) < 999990 AND SUM(inv.Quantity) > i.MaxStock THEN 1
+              ELSE 2
+            END ASC,
+            TotalQuantity DESC
           LIMIT @limit OFFSET @offset
         `;
 
@@ -486,7 +499,14 @@ export class InventoryController {
           ${whereClause}
           GROUP BY i.ItemId, i.Code, i.Alias, i.Name, i.Category, i.UOM, i.MinStock, i.MaxStock
           ${havingClause}
-          ORDER BY TotalQuantity DESC, i.Name ASC
+          ORDER BY 
+            CASE 
+              WHEN COALESCE(i.MinStock, 0) > 0 AND COALESCE(SUM(inv.Quantity), 0) < i.MinStock THEN 1
+              WHEN COALESCE(i.MaxStock, 0) > 0 AND COALESCE(i.MaxStock, 0) < 999990 AND COALESCE(SUM(inv.Quantity), 0) > i.MaxStock THEN 1
+              ELSE 2
+            END ASC,
+            TotalQuantity DESC, 
+            i.Name ASC
           LIMIT @limit OFFSET @offset
         `;
 
