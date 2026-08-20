@@ -116,11 +116,16 @@ export class GrnController {
 
       const itemsWithDetails: any[] = [];
       let totalGstAmt = 0;
+      let totalItemAmt = 0;
       let gstRateForSundry = 0;
 
       for (const item of validItems) {
         const itemRows = await db.query('SELECT Name, UOM, HSNCode, MRP, AltUnit, PurchPrice, MainUnit FROM tblItem WHERE ItemId = @itemId', { itemId: item.itemId });
-        const podRows = poId ? await db.query('SELECT UnitPrice, TotalAmount, MRP, DP, PurDis, DiscStr, GSTRate FROM tblPurchaseOrderDetail WHERE POId = @poId AND ItemId = @itemId', { poId, itemId: item.itemId }) : [];
+        const podRows = poId ? (
+          item.poDetailId
+            ? await db.query('SELECT UnitPrice, TotalAmount, MRP, DP, PurDis, DiscStr, GSTRate FROM tblPurchaseOrderDetail WHERE PODetailId = @poDetailId', { poDetailId: item.poDetailId })
+            : await db.query('SELECT UnitPrice, TotalAmount, MRP, DP, PurDis, DiscStr, GSTRate FROM tblPurchaseOrderDetail WHERE POId = @poId AND ItemId = @itemId', { poId, itemId: item.itemId })
+        ) : [];
         const itemName = itemRows.length > 0 ? itemRows[0].Name : '';
         const itemUom = itemRows.length > 0 ? itemRows[0].UOM : 'SQFT';
         const pod = podRows.length > 0 ? podRows[0] : {};
@@ -128,9 +133,11 @@ export class GrnController {
         const mrpVal = pod.MRP || (itemRows.length > 0 ? itemRows[0].MRP : 0) || 0;
         const gstRate = pod.GSTRate || 0;
 
+        const lineAmt = parseFloat(item.receivedQty) * parseFloat(unitPrice || 0);
+        totalItemAmt += lineAmt;
+
         if (gstRate > 0) {
           gstRateForSundry = gstRate;
-          const lineAmt = parseFloat(item.receivedQty) * parseFloat(unitPrice || 0);
           totalGstAmt += (lineAmt * (gstRate / 100));
         }
 
@@ -158,6 +165,17 @@ export class GrnController {
         return `${day}-${month}-${year}`;
       };
 
+      // Escape XML reserved characters to prevent "XML string is not valid" ERP errors
+      const xmlEscape = (val: any): string => {
+        if (val === null || val === undefined) return '';
+        return String(val)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
+      };
+
       const dateStr = getFormattedDate(invoiceDate);
 
       let itemDetailsXml = '';
@@ -165,13 +183,13 @@ export class GrnController {
         const amt = (parseFloat(item.receivedQty) * parseFloat(item.unitPrice || 0)).toFixed(2);
         itemDetailsXml += `<ItemDetail>` +
           `<SrNo>${index + 1}</SrNo>` +
-          `<ItemName>${item.itemName}</ItemName>` +
-          `<UnitName>${item.mainUnit || item.itemUom || 'SQFT'}</UnitName>` +
-          `<AltUnitName>${item.altUnit || ''}</AltUnitName>` +
+          `<ItemName>${xmlEscape(item.itemName)}</ItemName>` +
+          `<UnitName>${xmlEscape(item.mainUnit || item.itemUom || 'SQFT')}</UnitName>` +
+          `<AltUnitName>${xmlEscape(item.altUnit || '')}</AltUnitName>` +
           `<Qty>${item.receivedQty}</Qty>` +
           `<QtyMainUnit>${item.receivedQty}</QtyMainUnit>` +
           `<QtyAltUnit>${item.receivedQty}</QtyAltUnit>` +
-          `<ItemHSNCode>${item.hsnCode || ''}</ItemHSNCode>` +
+          `<ItemHSNCode>${xmlEscape(item.hsnCode || '')}</ItemHSNCode>` +
           `<Price>${item.unitPrice || 0}</Price>` +
           `<PriceAltUnit>${item.unitPrice || 0}</PriceAltUnit>` +
           `<ListPrice>${item.unitPrice || 0}</ListPrice>` +
@@ -181,23 +199,48 @@ export class GrnController {
       });
 
       let billSundriesXml = '';
+      const rawFinalAmount = totalItemAmt + totalGstAmt;
+      const roundedFinalAmount = Math.round(rawFinalAmount);
+      const roundOffAmt = parseFloat((roundedFinalAmount - rawFinalAmount).toFixed(2));
+
+      const bsDetails: string[] = [];
+      let srNo = 1;
+
       if (totalGstAmt > 0 && gstRateForSundry > 0) {
         const halfRate = (gstRateForSundry / 2).toFixed(2);
         const halfAmt = (totalGstAmt / 2).toFixed(2);
-        billSundriesXml = `<BillSundries>` +
+        bsDetails.push(
           `<BSDetail>` +
-          `<SrNo>1</SrNo>` +
+          `<SrNo>${srNo++}</SrNo>` +
           `<BSName>CGST</BSName>` +
           `<PercentVal>${halfRate}</PercentVal>` +
           `<Amt>${halfAmt}</Amt>` +
-          `</BSDetail>` +
+          `</BSDetail>`
+        );
+        bsDetails.push(
           `<BSDetail>` +
-          `<SrNo>2</SrNo>` +
+          `<SrNo>${srNo++}</SrNo>` +
           `<BSName>SGST</BSName>` +
           `<PercentVal>${halfRate}</PercentVal>` +
           `<Amt>${halfAmt}</Amt>` +
-          `</BSDetail>` +
-          `</BillSundries>`;
+          `</BSDetail>`
+        );
+      }
+
+      // Rounded Off (-) or Rounded Off (+) must come after all GST section items
+      const bsName = roundOffAmt < 0 ? 'Rounded Off (-)' : 'Rounded Off (+)';
+      const absoluteAmt = Math.abs(roundOffAmt).toFixed(2);
+      bsDetails.push(
+        `<BSDetail>` +
+        `<SrNo>${srNo++}</SrNo>` +
+        `<BSName>${bsName}</BSName>` +
+        `<PercentVal>0</PercentVal>` +
+        `<Amt>${absoluteAmt}</Amt>` +
+        `</BSDetail>`
+      );
+
+      if (bsDetails.length > 0) {
+        billSundriesXml = `<BillSundries>${bsDetails.join('')}</BillSundries>`;
       }
 
       let billingDetailsXml = '';
@@ -207,15 +250,15 @@ export class GrnController {
           itpan = supplierDetails.GSTIN.substring(2, 12);
         }
         billingDetailsXml = `<BillingDetails>` +
-          `<PartyName>${supplierDetails.Name || ''}</PartyName>` +
-          `<Address1>${supplierDetails.Add1 || ''}</Address1>` +
-          `<Address2>${supplierDetails.Add2 || ''}</Address2>` +
-          `<Address3>${supplierDetails.Add3 || ''}</Address3>` +
-          `<Address4>${supplierDetails.Add4 || ''}</Address4>` +
-          `<MobileNo>${supplierDetails.Mobile || ''}</MobileNo>` +
-          `<Email>${supplierDetails.Email || ''}</Email>` +
-          `<ITPAN>${itpan}</ITPAN>` +
-          `<GSTNo>${supplierDetails.GSTIN || ''}</GSTNo>` +
+          `<PartyName>${xmlEscape(supplierDetails.Name || '')}</PartyName>` +
+          `<Address1>${xmlEscape(supplierDetails.Add1 || '')}</Address1>` +
+          `<Address2>${xmlEscape(supplierDetails.Add2 || '')}</Address2>` +
+          `<Address3>${xmlEscape(supplierDetails.Add3 || '')}</Address3>` +
+          `<Address4>${xmlEscape(supplierDetails.Add4 || '')}</Address4>` +
+          `<MobileNo>${xmlEscape(supplierDetails.Mobile || '')}</MobileNo>` +
+          `<Email>${xmlEscape(supplierDetails.Email || '')}</Email>` +
+          `<ITPAN>${xmlEscape(itpan)}</ITPAN>` +
+          `<GSTNo>${xmlEscape(supplierDetails.GSTIN || '')}</GSTNo>` +
           `</BillingDetails>`;
       }
 
@@ -223,13 +266,13 @@ export class GrnController {
         `<VchSeriesName>TP_TAX</VchSeriesName>` +
         `<Date>${dateStr}</Date>` +
         `<VchType>2</VchType>` +
-        `<VchNo>${invoiceNo}</VchNo>` +
+        `<VchNo>${xmlEscape(invoiceNo)}</VchNo>` +
         `<STPTName>L/GST-MultiRate</STPTName>` +
-        `<MasterName1>${vendorName}</MasterName1>` +
+        `<MasterName1>${xmlEscape(vendorName)}</MasterName1>` +
         `<MasterName2>TURNING POINT</MasterName2>` +
         billingDetailsXml +
         `<VchOtherInfoDetails>` +
-        `<Narration1>${poCode}</Narration1>` +
+        `<Narration1>${xmlEscape(poCode)}</Narration1>` +
         `</VchOtherInfoDetails>` +
         `<ItemEntries>${itemDetailsXml}</ItemEntries>` +
         billSundriesXml +
@@ -303,6 +346,7 @@ export class GrnController {
         // Query the ordered qty vs already GRN'd quantities for each item in the PO
         const poItems = await db.query(`
           SELECT 
+              pod.PODetailId,
               pod.ItemId,
               pod.OrderQty,
               COALESCE(grn_sum.TotalGrnQty, 0) AS TotalGrnQty
@@ -321,7 +365,9 @@ export class GrnController {
         let totalReceivedAfterGrn = 0;
         
         for (const poItem of poItems) {
-          const currentGrnItem = validItems.find((vi: any) => vi.itemId === poItem.ItemId);
+          const currentGrnItem = validItems.find((vi: any) => 
+            vi.poDetailId ? vi.poDetailId === poItem.PODetailId : vi.itemId === poItem.ItemId
+          );
           const newGrnQty = currentGrnItem ? parseFloat(currentGrnItem.receivedQty || 0) : 0;
           const orderQty = parseFloat(poItem.OrderQty || 0);
           const totalGrnQty = parseFloat(poItem.TotalGrnQty || 0);
@@ -797,6 +843,17 @@ export class GrnController {
         return `${day}-${month}-${year}`;
       };
 
+      // Escape XML reserved characters to prevent "XML string is not valid" ERP errors
+      const xmlEscape = (val: any): string => {
+        if (val === null || val === undefined) return '';
+        return String(val)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
+      };
+
       const dateStr = getFormattedDate(new Date());
 
       let itemDetailsXml = '';
@@ -804,11 +861,11 @@ export class GrnController {
         itemDetailsXml += `<ItemDetail>` +
           `<Date>${dateStr}</Date>` +
           `<VchType>4</VchType>` +
-          `<VchNo>${poCode}</VchNo>` +
+          `<VchNo>${xmlEscape(poCode)}</VchNo>` +
           `<SrNo>${index + 1}</SrNo>` +
-          `<ItemName>${item.itemName}</ItemName>` +
-          `<UnitName>${item.itemUom || 'SQFT'}</UnitName>` +
-          `<AltUnitName>${item.itemUom || 'SQFT'}</AltUnitName>` +
+          `<ItemName>${xmlEscape(item.itemName)}</ItemName>` +
+          `<UnitName>${xmlEscape(item.itemUom || 'SQFT')}</UnitName>` +
+          `<AltUnitName>${xmlEscape(item.itemUom || 'SQFT')}</AltUnitName>` +
           `<Qty>${item.ReceivedQty}</Qty>` +
           `<ListPrice>${item.UnitPrice || 0}</ListPrice>` +
           `</ItemDetail>`;
@@ -819,9 +876,9 @@ export class GrnController {
         `<Date>${dateStr}</Date>` +
         `<VchType>4</VchType>` +
         `<TranType>3</TranType>` +
-        `<VchNo>${poCode}</VchNo>` +
+        `<VchNo>${xmlEscape(poCode)}</VchNo>` +
         `<STPTName>Local-18%</STPTName>` +
-        `<MasterName1>${vendorName}</MasterName1>` +
+        `<MasterName1>${xmlEscape(vendorName)}</MasterName1>` +
         `<MasterName2>TURNING POINT</MasterName2>` +
         `<ItemEntries>${itemDetailsXml}</ItemEntries>` +
         `</MaterialReceipt>`;

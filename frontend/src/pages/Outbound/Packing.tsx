@@ -47,9 +47,7 @@ export default function Packing() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/outbound/pick-lists');
-      // Filter lists that are COMPLETED (meaning fully picked) but not yet dispatched/packed
-      // Since packing creates a record, let's filter list.Status === 'COMPLETED'
+      const res = await api.get('/outbound/pick-lists?status=COMPLETED');
       setPickLists(res.data.filter((l: any) => l.Status === 'COMPLETED'));
       setLoading(false);
     } catch (err) {

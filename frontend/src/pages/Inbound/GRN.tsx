@@ -83,26 +83,29 @@ export default function GRN() {
       const res = await api.get(`/inbound/po-details/${poId}`);
       setPoDetails(res.data);
       
+      const getItemKey = (item: any) => item.PODetailId || item.ItemId;
+      
       // Initialize states
-      const qtys: Record<number, number> = {};
-      const btchs: Record<number, string> = {};
-      const exps: Record<number, string> = {};
-      const srls: Record<number, string> = {};
+      const qtys: Record<string | number, number> = {};
+      const btchs: Record<string | number, string> = {};
+      const exps: Record<string | number, string> = {};
+      const srls: Record<string | number, string> = {};
       
       res.data.forEach((item: any) => {
-        qtys[item.ItemId] = item.PendingQty;
+        const key = getItemKey(item);
+        qtys[key] = item.PendingQty;
         const datePrefix = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         const randSuffix = Math.floor(1000 + Math.random() * 9000);
 
         if (item.TrackBatch) {
-          btchs[item.ItemId] = `BAT-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}`;
+          btchs[key] = `BAT-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}`;
           const oneYearLater = new Date();
           oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
-          exps[item.ItemId] = oneYearLater.toISOString().split('T')[0];
+          exps[key] = oneYearLater.toISOString().split('T')[0];
         }
         if (item.TrackSerial) {
           const qty = item.PendingQty || 0;
-          srls[item.ItemId] = Array.from({ length: qty }, (_, idx) => 
+          srls[key] = Array.from({ length: qty }, (_, idx) => 
             `SR-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}-${idx + 1}`
           ).join(', ');
         }
@@ -120,48 +123,48 @@ export default function GRN() {
     }
   };
 
-  const handleQtyChange = (itemId: number, val: number) => {
-    setReceivedQtys(prev => ({ ...prev, [itemId]: val }));
+  const getItemKey = (item: any) => item.PODetailId || item.ItemId;
+
+  const handleQtyChange = (key: number | string, val: number) => {
+    setReceivedQtys(prev => ({ ...prev, [key]: val }));
   };
 
-  const handleBatchChange = (itemId: number, val: string) => {
-    setBatches(prev => ({ ...prev, [itemId]: val }));
+  const handleBatchChange = (key: number | string, val: string) => {
+    setBatches(prev => ({ ...prev, [key]: val }));
   };
 
-  const handleExpiryChange = (itemId: number, val: string) => {
-    setExpiries(prev => ({ ...prev, [itemId]: val }));
+  const handleExpiryChange = (key: number | string, val: string) => {
+    setExpiries(prev => ({ ...prev, [key]: val }));
   };
 
-  const handleSerialChange = (itemId: number, val: string) => {
-    setSerials(prev => ({ ...prev, [itemId]: val }));
+  const handleSerialChange = (key: number | string, val: string) => {
+    setSerials(prev => ({ ...prev, [key]: val }));
   };
 
-  const handleAutoGenerate = (itemId: number) => {
-    const item = poDetails.find(i => i.ItemId === itemId);
-    if (!item) return;
-
-    const qty = receivedQtys[itemId] || 0;
+  const handleAutoGenerate = (targetItem: any) => {
+    const key = getItemKey(targetItem);
+    const qty = receivedQtys[key] || 0;
     const datePrefix = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const randSuffix = Math.floor(1000 + Math.random() * 9000);
 
-    if (item.TrackBatch) {
+    if (targetItem.TrackBatch) {
       setBatches(prev => ({
         ...prev,
-        [itemId]: `BAT-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}`
+        [key]: `BAT-${targetItem.ItemCode || targetItem.ItemId}-${datePrefix}-${randSuffix}`
       }));
       const oneYearLater = new Date();
       oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
       setExpiries(prev => ({
         ...prev,
-        [itemId]: oneYearLater.toISOString().split('T')[0]
+        [key]: oneYearLater.toISOString().split('T')[0]
       }));
     }
 
-    if (item.TrackSerial && qty > 0) {
+    if (targetItem.TrackSerial && qty > 0) {
       const generated = Array.from({ length: qty }, (_, idx) =>
-        `SR-${item.ItemCode || item.ItemId}-${datePrefix}-${randSuffix}-${idx + 1}`
+        `SR-${targetItem.ItemCode || targetItem.ItemId}-${datePrefix}-${randSuffix}-${idx + 1}`
       ).join(', ');
-      setSerials(prev => ({ ...prev, [itemId]: generated }));
+      setSerials(prev => ({ ...prev, [key]: generated }));
     }
   };
 
@@ -188,9 +191,10 @@ export default function GRN() {
     // A throw inside .map() doesn't propagate to the surrounding async try/catch
     const validationErrors: string[] = [];
     for (const item of poDetails) {
-      const receivedQty = receivedQtys[item.ItemId] || 0;
+      const key = getItemKey(item);
+      const receivedQty = receivedQtys[key] || 0;
       if (item.TrackSerial && receivedQty > 0) {
-        const parsedSerials = (serials[item.ItemId] || '')
+        const parsedSerials = (serials[key] || '')
           .split(',')
           .map((s: string) => s.trim())
           .filter((s: string) => s.length > 0);
@@ -207,23 +211,25 @@ export default function GRN() {
     }
 
     const itemsPayload = poDetails.map(item => {
-      const receivedQty = receivedQtys[item.ItemId] || 0;
+      const key = getItemKey(item);
+      const receivedQty = receivedQtys[key] || 0;
       
       // Parse serials (already validated above)
       let parsedSerials: string[] = [];
       if (item.TrackSerial) {
-        parsedSerials = (serials[item.ItemId] || '')
+        parsedSerials = (serials[key] || '')
           .split(',')
           .map((s: string) => s.trim())
           .filter((s: string) => s.length > 0);
       }
 
       return {
+        poDetailId: item.PODetailId || null,
         itemId: item.ItemId,
         receivedQty,
         trackBatch: item.TrackBatch,
-        batchNumber: batches[item.ItemId] || null,
-        expiryDate: expiries[item.ItemId] || null,
+        batchNumber: batches[key] || null,
+        expiryDate: expiries[key] || null,
         trackSerial: item.TrackSerial,
         serialNumbers: parsedSerials
       };
@@ -241,12 +247,15 @@ export default function GRN() {
       setSuccess(`GRN created successfully: ${res.data.grnCode}. Proceed to QC Inspection.`);
       
       // Save items for printing before clearing
-      const printed = poDetails.map(item => ({
-        itemCode: item.ItemCode,
-        itemName: item.ItemName,
-        qty: receivedQtys[item.ItemId] || 0,
-        batch: batches[item.ItemId] || ''
-      })).filter(x => x.qty > 0);
+      const printed = poDetails.map(item => {
+        const key = getItemKey(item);
+        return {
+          itemCode: item.ItemCode,
+          itemName: item.ItemName,
+          qty: receivedQtys[key] || 0,
+          batch: batches[key] || ''
+        };
+      }).filter(x => x.qty > 0);
 
       if (printed.length > 0) {
         setItemsToPrint(printed);
@@ -416,11 +425,12 @@ export default function GRN() {
   };
 
   const triggerBarcodePrint = (item: any) => {
+    const key = getItemKey(item);
     setPrintItem({
       code: item.ItemCode,
       name: item.ItemName,
-      batch: batches[item.ItemId] || 'N/A',
-      qty: receivedQtys[item.ItemId] || 0
+      batch: batches[key] || 'N/A',
+      qty: receivedQtys[key] || 0
     });
     setPrintOpen(true);
   };
@@ -525,7 +535,7 @@ export default function GRN() {
               size="small" 
               variant="outlined" 
               color="secondary"
-              onClick={() => poDetails.forEach(item => handleAutoGenerate(item.ItemId))}
+              onClick={() => poDetails.forEach(item => handleAutoGenerate(item))}
               sx={{ fontWeight: 700 }}
             >
               Auto-Generate All Tracking Codes
@@ -544,8 +554,10 @@ export default function GRN() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {poDetails.map((item) => (
-                  <React.Fragment key={item.ItemId}>
+                {poDetails.map((item) => {
+                  const key = getItemKey(item);
+                  return (
+                  <React.Fragment key={key}>
                     <TableRow hover>
                       <TableCell sx={{ fontWeight: 600 }}>{item.ItemName} ({item.ItemCode})</TableCell>
                       <TableCell>{item.OrderQty} {item.ItemUOM}</TableCell>
@@ -555,8 +567,8 @@ export default function GRN() {
                           type="number"
                           size="small"
                           sx={{ width: 100 }}
-                          value={receivedQtys[item.ItemId] || ''}
-                          onChange={(e) => handleQtyChange(item.ItemId, parseFloat(e.target.value))}
+                          value={receivedQtys[key] ?? ''}
+                          onChange={(e) => handleQtyChange(key, parseFloat(e.target.value))}
                         />
                       </TableCell>
                       <TableCell>
@@ -588,12 +600,12 @@ export default function GRN() {
                                     label="Batch Number" 
                                     size="small" 
                                     fullWidth
-                                    value={batches[item.ItemId] || ''} 
-                                    onChange={(e) => handleBatchChange(item.ItemId, e.target.value)} 
+                                    value={batches[key] || ''} 
+                                    onChange={(e) => handleBatchChange(key, e.target.value)} 
                                     InputProps={{
                                       endAdornment: (
                                         <InputAdornment position="end">
-                                          <Button size="small" variant="text" onClick={() => handleAutoGenerate(item.ItemId)} sx={{ textTransform: 'none', minWidth: 'auto', p: 0.5, fontWeight: 700 }}>Auto</Button>
+                                          <Button size="small" variant="text" onClick={() => handleAutoGenerate(item)} sx={{ textTransform: 'none', minWidth: 'auto', p: 0.5, fontWeight: 700 }}>Auto</Button>
                                         </InputAdornment>
                                       )
                                     }}
@@ -606,8 +618,8 @@ export default function GRN() {
                                     size="small" 
                                     fullWidth 
                                     InputLabelProps={{ shrink: true }}
-                                    value={expiries[item.ItemId] || ''} 
-                                    onChange={(e) => handleExpiryChange(item.ItemId, e.target.value)} 
+                                    value={expiries[key] || ''} 
+                                    onChange={(e) => handleExpiryChange(key, e.target.value)} 
                                   />
                                 </Grid>
                               </>
@@ -619,12 +631,12 @@ export default function GRN() {
                                   size="small" 
                                   placeholder="SN-001, SN-002, SN-003..."
                                   fullWidth
-                                  value={serials[item.ItemId] || ''} 
-                                  onChange={(e) => handleSerialChange(item.ItemId, e.target.value)} 
+                                  value={serials[key] || ''} 
+                                  onChange={(e) => handleSerialChange(key, e.target.value)} 
                                   InputProps={{
                                     endAdornment: (
                                       <InputAdornment position="end">
-                                        <Button size="small" variant="text" onClick={() => handleAutoGenerate(item.ItemId)} sx={{ textTransform: 'none', minWidth: 'auto', p: 0.5, fontWeight: 700 }}>Auto</Button>
+                                        <Button size="small" variant="text" onClick={() => handleAutoGenerate(item)} sx={{ textTransform: 'none', minWidth: 'auto', p: 0.5, fontWeight: 700 }}>Auto</Button>
                                       </InputAdornment>
                                     )
                                   }}
@@ -636,7 +648,8 @@ export default function GRN() {
                       </TableRow>
                     )}
                   </React.Fragment>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>

@@ -21,26 +21,39 @@ export class OutboundController {
       const params: Record<string, any> = {};
 
       if (search) {
-        whereClause += ' AND (SOCode LIKE @searchPattern OR CustomerName LIKE @searchPattern OR CustomerCode LIKE @searchPattern OR Salesman LIKE @searchPattern)';
+        whereClause += ' AND (so.SOCode LIKE @searchPattern OR so.CustomerName LIKE @searchPattern OR so.CustomerCode LIKE @searchPattern OR so.Salesman LIKE @searchPattern)';
         params.searchPattern = `%${search}%`;
       }
 
       if (status) {
-        whereClause += ' AND Status = @status';
+        whereClause += ' AND so.Status = @status';
         params.status = status;
       }
 
       if (startDate) {
-        whereClause += ' AND OrderDate >= @startDate';
+        whereClause += ' AND so.OrderDate >= @startDate';
         params.startDate = startDate;
       }
 
       if (endDate) {
-        whereClause += ' AND OrderDate <= @endDate';
+        whereClause += ' AND so.OrderDate <= @endDate';
         params.endDate = endDate + ' 23:59:59';
       }
 
       const isPaginated = req.query.page !== undefined;
+
+      const baseSelect = `
+        SELECT 
+          so.*,
+          COALESCE(binStock.TotalAvail, 0) AS TotalAvailableBinStock
+        FROM tblSalesOrder so
+        LEFT JOIN (
+          SELECT sod.SOId, SUM(GREATEST(0, inv.Quantity - inv.ReservedQty)) AS TotalAvail
+          FROM tblSalesOrderDetail sod
+          JOIN tblInventory inv ON sod.ItemId = inv.ItemId
+          GROUP BY sod.SOId
+        ) binStock ON so.SOId = binStock.SOId
+      `;
 
       if (isPaginated) {
         const offset = page * limit;
@@ -48,15 +61,15 @@ export class OutboundController {
         params.offset = offset;
 
         // Query total
-        const countQuery = `SELECT COUNT(*) AS total FROM tblSalesOrder ${whereClause}`;
+        const countQuery = `SELECT COUNT(*) AS total FROM tblSalesOrder so ${whereClause}`;
         const countRows = await db.query(countQuery, params);
         const total = countRows.length > 0 ? countRows[0].total : 0;
 
         // Query paginated
         const selectQuery = `
-          SELECT * FROM tblSalesOrder 
+          ${baseSelect} 
           ${whereClause} 
-          ORDER BY OrderDate DESC, SOId DESC 
+          ORDER BY so.OrderDate DESC, so.SOId DESC 
           LIMIT @limit OFFSET @offset
         `;
         const items = await db.query(selectQuery, params);
@@ -64,9 +77,9 @@ export class OutboundController {
         return res.json({ items, total });
       } else {
         const selectQuery = `
-          SELECT * FROM tblSalesOrder 
+          ${baseSelect} 
           ${whereClause} 
-          ORDER BY OrderDate DESC, SOId DESC
+          ORDER BY so.OrderDate DESC, so.SOId DESC
         `;
         const items = await db.query(selectQuery, params);
         return res.json(items);
@@ -80,7 +93,8 @@ export class OutboundController {
     const { soId } = req.params;
     try {
       const rows = await db.query(`
-        SELECT sod.*, i.Name AS ItemName, i.Code AS ItemCode 
+        SELECT sod.*, i.Name AS ItemName, i.Code AS ItemCode,
+               COALESCE((SELECT SUM(inv.Quantity - inv.ReservedQty) FROM tblInventory inv WHERE inv.ItemId = sod.ItemId AND (inv.Quantity - inv.ReservedQty) > 0), 0) AS AvailableInBins
         FROM tblSalesOrderDetail sod
         INNER JOIN tblItem i ON sod.ItemId = i.ItemId
         WHERE sod.SOId = @soId
@@ -187,15 +201,39 @@ export class OutboundController {
 
   public static async getPickLists(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query(`
-        SELECT p.*, so.SOCode, u1.FullName AS CreatorName, u2.FullName AS AssigneeName
+      const q = (req.query.q || req.query.search || '') as string;
+      const statusParam = (req.query.status || '') as string;
+
+      let sql = `
+        SELECT p.*, so.SOCode, u1.FullName AS CreatorName, u2.FullName AS AssigneeName,
+               pack.CartonNo, pack.PalletNo, pack.ShippingLabel, pack.GrossWeight,
+               pack.LengthCm, pack.WidthCm, pack.HeightCm, pack.ItemCount, pack.Notes AS PackingNotes,
+               pack.PackCode
         FROM tblPickList p
         INNER JOIN tblSalesOrder so ON p.SOId = so.SOId
         INNER JOIN tblUser u1 ON p.CreatedBy = u1.UserId
         LEFT JOIN tblUser u2 ON p.AssignedTo = u2.UserId
-        WHERE so.Status NOT IN ('DISPATCHED', 'CANCELLED')
-        ORDER BY p.PickListId DESC
-      `);
+        LEFT JOIN tblPacking pack ON p.PickListId = pack.PickListId
+        WHERE 1=1
+      `;
+      const params: any = {};
+
+      if (statusParam.toUpperCase() === 'ALL') {
+        sql += ` AND so.Status NOT IN ('CANCELLED')`;
+      } else if (statusParam.trim()) {
+        sql += ` AND p.Status = @statusParam`;
+        params.statusParam = statusParam.trim();
+      } else {
+        // Default: Only show active pick lists requiring picking
+        sql += ` AND p.Status IN ('PENDING', 'IN_PROGRESS', 'PICKING')`;
+      }
+
+      if (q.trim()) {
+        sql += ` AND (p.PickCode LIKE @search OR so.SOCode LIKE @search OR u2.FullName LIKE @search OR p.Status LIKE @search)`;
+        params.search = `%${q.trim()}%`;
+      }
+      sql += ` ORDER BY p.PickListId DESC`;
+      const rows = await db.query(sql, params);
       return res.json(rows);
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
@@ -233,132 +271,141 @@ export class OutboundController {
     }
 
     try {
-      for (const item of items) {
-        // Fetch picking detail
-        const details = await db.query(`
-          SELECT ItemId, BinId, BatchId, Quantity, PickedQty 
-          FROM tblPickListDetail WHERE PickDetailId = @id
-        `, { id: item.pickDetailId });
+      await db.transaction(async (tx) => {
+        for (const item of items) {
+          // Fetch picking detail
+          const details = await tx.query(`
+            SELECT pd.*, i.Name AS ItemName, i.Code AS ItemCode, b.Code AS BinCode
+            FROM tblPickListDetail pd
+            INNER JOIN tblItem i ON pd.ItemId = i.ItemId
+            INNER JOIN tblBin b ON pd.BinId = b.BinId
+            WHERE pd.PickDetailId = @id
+          `, { id: item.pickDetailId });
 
-        if (details.length === 0) continue;
+          if (details.length === 0) continue;
 
-        const pd = details[0];
-        const addedQty = item.pickedQty;
+          const pd = details[0];
+          const addedQty = item.pickedQty;
 
-        // 1. Update pick list detail line
-        await db.executeCmd(`
-          UPDATE tblPickListDetail 
-          SET PickedQty = PickedQty + @qty,
-              Status = CASE WHEN PickedQty + @qty >= Quantity THEN 'COMPLETED' ELSE 'PENDING' END
-          WHERE PickDetailId = @id
-        `, { qty: addedQty, id: item.pickDetailId });
+          // 1. Update pick list detail line
+          await tx.executeCmd(`
+            UPDATE tblPickListDetail 
+            SET PickedQty = PickedQty + @qty,
+                Status = CASE WHEN PickedQty + @qty >= Quantity THEN 'COMPLETED' ELSE 'PENDING' END
+            WHERE PickDetailId = @id
+          `, { qty: addedQty, id: item.pickDetailId });
 
-        // 2. Verify that inventory actually has enough stock to pick
-        const stockRows = await db.query(`
-          SELECT Quantity, ReservedQty FROM tblInventory
-          WHERE BinId = @binId AND ItemId = @itemId
-            AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
-        `, { binId: pd.BinId, itemId: pd.ItemId, batchId: pd.BatchId });
+          // 2. Verify that inventory actually has enough stock to pick
+          const stockRows = await tx.query(`
+            SELECT Quantity, ReservedQty FROM tblInventory
+            WHERE BinId = @binId AND ItemId = @itemId
+              AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
+          `, { binId: pd.BinId, itemId: pd.ItemId, batchId: pd.BatchId });
 
-        const currentQty = stockRows.length > 0 ? Number(stockRows[0].Quantity) : 0;
-        if (currentQty < addedQty) {
-          throw new Error(`Insufficient inventory in Bin to pick requested qty. Available: ${currentQty}, Requested: ${addedQty}`);
-        }
+          const currentQty = stockRows.length > 0 ? Number(stockRows[0].Quantity) : 0;
+          if (currentQty < addedQty) {
+            throw new Error(`Insufficient inventory in Bin "${pd.BinCode}". Item "${pd.ItemName}" has only ${currentQty} units available, but you requested to pick ${addedQty}.`);
+          }
 
-        // Reduce stock from tblInventory (both physically and reserved levels)
-        // Use CASE WHEN for cross-DB compatibility (MSSQL does not support MAX() in UPDATE SET)
-        await db.executeCmd(`
-          UPDATE tblInventory
-          SET Quantity = CASE WHEN Quantity - @qty < 0 THEN 0 ELSE Quantity - @qty END,
-              ReservedQty = CASE WHEN ReservedQty - @qty < 0 THEN 0 ELSE ReservedQty - @qty END,
-              UpdatedAt = CURRENT_TIMESTAMP
-          WHERE BinId = @binId AND ItemId = @itemId
-            AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
-        `, { qty: addedQty, binId: pd.BinId, itemId: pd.ItemId, batchId: pd.BatchId });
+          // Reduce stock from tblInventory (both physically and reserved levels)
+          await tx.executeCmd(`
+            UPDATE tblInventory
+            SET Quantity = CASE WHEN Quantity - @qty < 0 THEN 0 ELSE Quantity - @qty END,
+                ReservedQty = CASE WHEN ReservedQty - @qty < 0 THEN 0 ELSE ReservedQty - @qty END,
+                UpdatedAt = CURRENT_TIMESTAMP
+            WHERE BinId = @binId AND ItemId = @itemId
+              AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
+          `, { qty: addedQty, binId: pd.BinId, itemId: pd.ItemId, batchId: pd.BatchId });
 
-        // Remove inventory record if empty
-        await db.executeCmd(`
-          DELETE FROM tblInventory 
-          WHERE Quantity <= 0 AND BinId = @binId AND ItemId = @itemId
-            AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
-        `, { binId: pd.BinId, itemId: pd.ItemId, batchId: pd.BatchId });
+          // Remove inventory record if empty
+          await tx.executeCmd(`
+            DELETE FROM tblInventory 
+            WHERE Quantity <= 0 AND BinId = @binId AND ItemId = @itemId
+              AND (BatchId = @batchId OR (BatchId IS NULL AND @batchId IS NULL))
+          `, { binId: pd.BinId, itemId: pd.ItemId, batchId: pd.BatchId });
 
-        // Check for Low Stock Notification
-        const stockSum = await db.query(`
-          SELECT SUM(Quantity) AS total FROM tblInventory WHERE ItemId = @itemId
-        `, { itemId: pd.ItemId });
-        const remainingQty = stockSum.length > 0 && stockSum[0].total !== null ? Number(stockSum[0].total) : 0.0;
-
-        const itemDef = await db.query('SELECT Name, MinStock FROM tblItem WHERE ItemId = @itemId', { itemId: pd.ItemId });
-        if (itemDef.length > 0 && itemDef[0].MinStock !== null && remainingQty < Number(itemDef[0].MinStock)) {
-          const minStock = Number(itemDef[0].MinStock);
-          const itemName = itemDef[0].Name;
-
-          await db.executeCmd(`
-            INSERT INTO tblNotification (Type, Title, Message, IsRead, CreatedAt)
-            VALUES ('LOW_STOCK', 'Low Stock Alert', @msg, 0, CURRENT_TIMESTAMP)
-          `, { msg: `Inventory level for '${itemName}' has fallen to ${remainingQty} UOM, which is below the defined MinStock threshold of ${minStock} UOM.` });
-
-          // Log to persistent tblStockAlertLog if not already logged as ACTIVE
-          const activeLog = await db.query(`
-            SELECT AlertLogId FROM tblStockAlertLog 
-            WHERE ItemId = @itemId AND AlertType = 'BELOW_MIN' AND Status = 'ACTIVE'
+          // Check for Low Stock Notification
+          const stockSum = await tx.query(`
+            SELECT SUM(Quantity) AS total FROM tblInventory WHERE ItemId = @itemId
           `, { itemId: pd.ItemId });
+          const remainingQty = stockSum.length > 0 && stockSum[0].total !== null ? Number(stockSum[0].total) : 0.0;
 
-          if (activeLog.length === 0) {
-            await db.executeCmd(`
-              INSERT INTO tblStockAlertLog (ItemId, AlertType, CurrentStock, ThresholdValue, ReferenceDoc, Status)
-              VALUES (@itemId, 'BELOW_MIN', @currentStock, @thresholdValue, @refDoc, 'ACTIVE')
-            `, {
-              itemId: pd.ItemId,
-              currentStock: remainingQty,
-              thresholdValue: minStock,
-              refDoc: `PK-${pickListId}`
-            });
+          const itemDef = await tx.query('SELECT Name, MinStock FROM tblItem WHERE ItemId = @itemId', { itemId: pd.ItemId });
+          if (itemDef.length > 0 && itemDef[0].MinStock !== null && remainingQty < Number(itemDef[0].MinStock)) {
+            const minStock = Number(itemDef[0].MinStock);
+            const itemName = itemDef[0].Name;
+
+            await tx.executeCmd(`
+              INSERT INTO tblNotification (Type, Title, Message, IsRead, CreatedAt)
+              VALUES ('LOW_STOCK', 'Low Stock Alert', @msg, 0, CURRENT_TIMESTAMP)
+            `, { msg: `Inventory level for '${itemName}' has fallen to ${remainingQty} UOM, which is below the defined MinStock threshold of ${minStock} UOM.` });
+
+            // Log to persistent tblStockAlertLog if not already logged as ACTIVE
+            const activeLog = await tx.query(`
+              SELECT AlertLogId FROM tblStockAlertLog 
+              WHERE ItemId = @itemId AND AlertType = 'BELOW_MIN' AND Status = 'ACTIVE'
+            `, { itemId: pd.ItemId });
+
+            if (activeLog.length === 0) {
+              await tx.executeCmd(`
+                INSERT INTO tblStockAlertLog (ItemId, AlertType, CurrentStock, ThresholdValue, ReferenceDoc, Status)
+                VALUES (@itemId, 'BELOW_MIN', @currentStock, @thresholdValue, @refDoc, 'ACTIVE')
+              `, {
+                itemId: pd.ItemId,
+                currentStock: remainingQty,
+                thresholdValue: minStock,
+                refDoc: `PK-${pickListId}`
+              });
+            }
+          }
+
+          // 3. Update bin occupied capacity (deduct weight)
+          const itemInfo = await tx.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId: pd.ItemId });
+          const itemWeight = itemInfo.length > 0 && itemInfo[0].Weight !== null && Number(itemInfo[0].Weight) > 0 ? Number(itemInfo[0].Weight) : 2.0;
+          const itemVolume = itemInfo.length > 0 && itemInfo[0].Volume !== null && Number(itemInfo[0].Volume) > 0 ? Number(itemInfo[0].Volume) : 1.5;
+          const weightDelta = addedQty * itemWeight;
+          const volumeDelta = addedQty * itemVolume;
+          await tx.executeCmd(`
+            UPDATE tblBin
+            SET OccupiedWeight = CASE WHEN OccupiedWeight - @weightDelta < 0 THEN 0 ELSE OccupiedWeight - @weightDelta END,
+                OccupiedVolume = CASE WHEN OccupiedVolume - @volumeDelta < 0 THEN 0 ELSE OccupiedVolume - @volumeDelta END
+            WHERE BinId = @binId
+          `, { weightDelta, volumeDelta, binId: pd.BinId });
+
+          // 4. Update tblSalesOrderDetail picked quantity
+          const pickHeader = await tx.query('SELECT SOId FROM tblPickList WHERE PickListId = @pickListId', { pickListId });
+          if (pickHeader.length > 0) {
+            const soId = pickHeader[0].SOId;
+            await tx.executeCmd(`
+              UPDATE tblSalesOrderDetail 
+              SET PickedQty = PickedQty + @qty
+              WHERE SOId = @soId AND ItemId = @itemId
+            `, { qty: addedQty, soId, itemId: pd.ItemId });
           }
         }
 
-        // 3. Update bin occupied capacity (deduct weight)
-        // Use item-specific weight/volume if available, fallback to defaults
-        const itemInfo = await db.query('SELECT Weight, Volume FROM tblItem WHERE ItemId = @itemId', { itemId: pd.ItemId });
-        const itemWeight = itemInfo.length > 0 && itemInfo[0].Weight !== null && Number(itemInfo[0].Weight) > 0 ? Number(itemInfo[0].Weight) : 2.0;
-        const itemVolume = itemInfo.length > 0 && itemInfo[0].Volume !== null && Number(itemInfo[0].Volume) > 0 ? Number(itemInfo[0].Volume) : 1.5;
-        const weightDelta = addedQty * itemWeight;
-        const volumeDelta = addedQty * itemVolume;
-        await db.executeCmd(`
-          UPDATE tblBin
-          SET OccupiedWeight = CASE WHEN OccupiedWeight - @weightDelta < 0 THEN 0 ELSE OccupiedWeight - @weightDelta END,
-              OccupiedVolume = CASE WHEN OccupiedVolume - @volumeDelta < 0 THEN 0 ELSE OccupiedVolume - @volumeDelta END
-          WHERE BinId = @binId
-        `, { weightDelta, volumeDelta, binId: pd.BinId });
+        // Mark Pick List and Sales Order status based on completion
+        const lines = await tx.query(`
+          SELECT COUNT(*) as pendingLines FROM tblPickListDetail 
+          WHERE PickListId = @pickListId AND Status = 'PENDING'
+        `, { pickListId });
 
-        // 4. Update tblSalesOrderDetail picked quantity
-        const pickHeader = await db.query('SELECT SOId FROM tblPickList WHERE PickListId = @pickListId', { pickListId });
-        if (pickHeader.length > 0) {
-          const soId = pickHeader[0].SOId;
-          await db.executeCmd(`
-            UPDATE tblSalesOrderDetail 
-            SET PickedQty = PickedQty + @qty
-            WHERE SOId = @soId AND ItemId = @itemId
-          `, { qty: addedQty, soId, itemId: pd.ItemId });
+        const pickHeader = await tx.query('SELECT SOId FROM tblPickList WHERE PickListId = @pickListId', { pickListId });
+
+        if (lines[0].pendingLines === 0) {
+          await tx.executeCmd(`UPDATE tblPickList SET Status = 'COMPLETED', UpdatedAt = CURRENT_TIMESTAMP WHERE PickListId = @pickListId`, { pickListId });
+
+          if (pickHeader.length > 0) {
+            await tx.executeCmd(`UPDATE tblSalesOrder SET Status = 'PICKED', UpdatedAt = CURRENT_TIMESTAMP WHERE SOId = @soId`, { soId: pickHeader[0].SOId });
+          }
+        } else {
+          await tx.executeCmd(`UPDATE tblPickList SET Status = 'IN_PROGRESS', UpdatedAt = CURRENT_TIMESTAMP WHERE PickListId = @pickListId AND Status = 'PENDING'`, { pickListId });
+
+          if (pickHeader.length > 0) {
+            await tx.executeCmd(`UPDATE tblSalesOrder SET Status = 'PICKING', UpdatedAt = CURRENT_TIMESTAMP WHERE SOId = @soId AND Status IN ('PENDING', 'RESERVED', 'PARTIAL_RESERVED')`, { soId: pickHeader[0].SOId });
+          }
         }
-      }
-
-      // Mark Pick List status as COMPLETED if all lines done
-      const lines = await db.query(`
-        SELECT COUNT(*) as pendingLines FROM tblPickListDetail 
-        WHERE PickListId = @pickListId AND Status = 'PENDING'
-      `, { pickListId });
-
-      if (lines[0].pendingLines === 0) {
-        await db.executeCmd(`UPDATE tblPickList SET Status = 'COMPLETED', UpdatedAt = CURRENT_TIMESTAMP WHERE PickListId = @pickListId`, { pickListId });
-
-        // Update Sales Order status
-        const pickHeader = await db.query('SELECT SOId FROM tblPickList WHERE PickListId = @pickListId', { pickListId });
-        if (pickHeader.length > 0) {
-          await db.executeCmd(`UPDATE tblSalesOrder SET Status = 'PICKED', UpdatedAt = CURRENT_TIMESTAMP WHERE SOId = @soId`, { soId: pickHeader[0].SOId });
-        }
-      }
+      });
 
       return res.json({ message: 'Picking confirmed successfully' });
     } catch (err: any) {

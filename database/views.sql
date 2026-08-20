@@ -106,7 +106,7 @@ FROM tblGRNDetail gd
 INNER JOIN tblGRN g ON gd.GRNId = g.GRNId
 INNER JOIN tblItem item ON gd.ItemId = item.ItemId
 LEFT JOIN tblBatch batch ON gd.BatchId = batch.BatchId
-WHERE g.Status = 'QC_COMPLETED' AND (gd.AcceptedQty - gd.PutawayQty) > 0;
+WHERE g.Status IN ('QC_COMPLETED', 'PARTIAL_PUTAWAY') AND (gd.AcceptedQty - gd.PutawayQty) > 0;
 GO
 
 -- 5. vw_PendingPick: Pending items to be picked for Sales Orders

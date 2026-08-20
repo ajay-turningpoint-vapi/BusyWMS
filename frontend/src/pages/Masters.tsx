@@ -700,42 +700,6 @@ export default function Masters() {
           <Typography variant="body2" color="text.secondary">Manage warehouse locations, zones, racks, shelves, physical bins, items, and users.</Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5 }}>
-          {tabValue === 5 && (
-            <Button 
-              variant="contained" 
-              color="secondary"
-              startIcon={syncingItems ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
-              onClick={handleSyncItems}
-              disabled={syncingItems}
-              sx={{ fontWeight: 600 }}
-            >
-              {syncingItems ? 'Syncing...' : 'Sync ERP Items'}
-            </Button>
-          )}
-          {tabValue === 6 && (
-            <Button 
-              variant="contained" 
-              color="secondary"
-              startIcon={syncingCustomers ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
-              onClick={handleSyncCustomers}
-              disabled={syncingCustomers}
-              sx={{ fontWeight: 600 }}
-            >
-              {syncingCustomers ? 'Syncing...' : 'Sync ERP Customers'}
-            </Button>
-          )}
-          {tabValue === 7 && (
-            <Button 
-              variant="contained" 
-              color="secondary"
-              startIcon={syncingSuppliers ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
-              onClick={handleSyncSuppliers}
-              disabled={syncingSuppliers}
-              sx={{ fontWeight: 600 }}
-            >
-              {syncingSuppliers ? 'Syncing...' : 'Sync ERP Suppliers'}
-            </Button>
-          )}
           <Button variant="outlined" startIcon={<FileDown size={16} />} onClick={handleExportCSV} sx={{ fontWeight: 600 }}>
             Export CSV
           </Button>
@@ -747,6 +711,43 @@ export default function Masters() {
           >
             Add Master Record
           </Button>
+          {tabValue === 5 && (
+            <Button 
+              variant="contained" 
+              color="success"
+              startIcon={syncingItems ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
+              onClick={handleSyncItems}
+              disabled={syncingItems}
+              sx={{ fontWeight: 600 }}
+            >
+              {syncingItems ? 'Syncing...' : 'Sync ERP Items'}
+            </Button>
+          )}
+          {tabValue === 6 && (
+            <Button 
+              variant="contained" 
+              color="success"
+              startIcon={syncingCustomers ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
+              onClick={handleSyncCustomers}
+              disabled={syncingCustomers}
+              sx={{ fontWeight: 600 }}
+            >
+              {syncingCustomers ? 'Syncing...' : 'Sync ERP Customers'}
+            </Button>
+          )}
+          {tabValue === 7 && (
+            <Button 
+              variant="contained" 
+              color="success"
+              startIcon={syncingSuppliers ? <CircularProgress size={16} color="inherit" /> : <RefreshCw size={16} />} 
+              onClick={handleSyncSuppliers}
+              disabled={syncingSuppliers}
+              sx={{ fontWeight: 600 }}
+            >
+              {syncingSuppliers ? 'Syncing...' : 'Sync ERP Suppliers'}
+            </Button>
+          )}
+          
         </Box>
       </Box>
 
@@ -1372,8 +1373,8 @@ export default function Masters() {
                 <TextField label="Selling Price" name="sellingPrice" type="number" value={formData.sellingPrice || 0} fullWidth size="small" onChange={handleInputChange} disabled />
               </Box>
               <Box sx={{ display: 'flex', gap: 2 }}>
-                <FormControlLabel control={<Switch name="trackBatch" checked={!!formData.trackBatch} onChange={handleSwitchChange} disabled />} label="Track Batch" />
-                <FormControlLabel control={<Switch name="trackSerial" checked={!!formData.trackSerial} onChange={handleSwitchChange} disabled />} label="Track Serial No" />
+                <FormControlLabel control={<Switch name="trackBatch" checked={!!formData.trackBatch} onChange={handleSwitchChange} />} label="Track Batch" />
+                <FormControlLabel control={<Switch name="trackSerial" checked={!!formData.trackSerial} onChange={handleSwitchChange} />} label="Track Serial No" />
               </Box>
             </>
           )}

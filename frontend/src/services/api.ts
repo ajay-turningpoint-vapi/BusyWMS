@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
 
 const api = axios.create({
   baseURL: '/api',
@@ -7,9 +8,6 @@ const api = axios.create({
   },
   withCredentials: true, // Send cookies automatically
 });
-
-// We don't need the request interceptor to attach Bearer tokens anymore, 
-// since we use HttpOnly cookies.
 
 let isRefreshing = false;
 let refreshSubscribers: ((token?: string) => void)[] = [];
@@ -27,14 +25,23 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const isAuthEndpoint = originalRequest?.url?.includes('/auth/login') || originalRequest?.url?.includes('/auth/refresh');
 
-    // If it's a 401 and we haven't already retried this request
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // If 401 Unauthorized (Invalid or expired token)
+    if (error.response?.status === 401) {
+      if (isAuthEndpoint || originalRequest._retry) {
+        // Direct redirect to login screen on auth endpoint failure or retry failure
+        useAuthStore.getState().logout();
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+        return Promise.reject(error);
+      }
+
       if (isRefreshing) {
-        // If a refresh is already in progress, wait for it to finish and retry
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
           subscribeTokenRefresh(() => {
-            resolve(api(originalRequest));
+            api(originalRequest).then(resolve).catch(reject);
           });
         });
       }
@@ -43,22 +50,18 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        // Call the refresh endpoint (this automatically sends the refresh cookie and sets the new access cookie)
         await axios.post('/api/auth/refresh', {}, { withCredentials: true });
-        
         isRefreshing = false;
         onRefreshed();
-        
-        // Retry original request (which will now send the new access cookie)
         return api(originalRequest);
       } catch (refreshError) {
         isRefreshing = false;
         refreshSubscribers = [];
         
-        console.warn('Session expired. Logging out user.');
-        localStorage.removeItem('wms_user');
+        console.warn('Session expired or invalid token. Redirecting to login screen.');
+        useAuthStore.getState().logout();
         
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           window.location.href = '/login';
         }
         return Promise.reject(refreshError);

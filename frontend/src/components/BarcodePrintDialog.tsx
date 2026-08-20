@@ -3,7 +3,8 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, 
   Grid, FormControl, InputLabel, Select, MenuItem, TextField, 
   Box, Typography, Paper, Divider, Slider, FormControlLabel, Checkbox,
-  CircularProgress, Alert, Accordion, AccordionSummary, AccordionDetails
+  CircularProgress, Alert, Accordion, AccordionSummary, AccordionDetails,
+  Radio, RadioGroup
 } from '@mui/material';
 import { Printer, Settings, Sliders, Eye, ChevronDown } from 'lucide-react';
 import api from '../services/api';
@@ -34,6 +35,9 @@ export default function BarcodePrintDialog({
   const [loading, setLoading] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [trackBatch, setTrackBatch] = useState(false);
+  const [trackSerial, setTrackSerial] = useState(false);
+  const [printMode, setPrintMode] = useState<'NONE' | 'BATCH' | 'SERIAL'>('NONE');
 
   // Print field values (Read-Only database values)
   const [printItemName, setPrintItemName] = useState('');
@@ -93,7 +97,7 @@ export default function BarcodePrintDialog({
         setPrintItemName('');
         setPrintItemCode(itemName); // bin locator code
         setPrintSKU('');
-        setPrintBarcodeNumber(itemCode); // bin barcode
+        setPrintBarcodeNumber(itemName); // Use Bin Code (Locator)
         setPrintBatchNumber('');
         setPrintSerialNumber('');
         setPrintMRP('');
@@ -101,7 +105,10 @@ export default function BarcodePrintDialog({
         setPrintMfgDate('');
         setPrintExpiryDate('');
         setPrintUOM('');
-        // Adjust default visibility for bin
+        setBarcodeWidth(2); 
+        setTrackBatch(false);
+        setTrackSerial(false);
+        setPrintMode('NONE');
         setShowCompanyName(false);
         setShowItemName(false);
         setShowItemCode(true); // bin locator code
@@ -209,6 +216,37 @@ export default function BarcodePrintDialog({
       setPrintMfgDate(details.mfgDate || '');
       setPrintExpiryDate(details.expiryDate || '');
       setPrintUOM(details.uom || '');
+
+      const hasBatch = !!details.trackBatch;
+      const hasSerial = !!details.trackSerial;
+      setTrackBatch(hasBatch);
+      setTrackSerial(hasSerial);
+
+      if (hasBatch && hasSerial) {
+        setPrintMode('BATCH');
+        setShowBatchNumber(true);
+        setShowSerialNumber(false);
+        setShowMfgDate(true);
+        setShowExpiryDate(true);
+      } else if (hasBatch) {
+        setPrintMode('BATCH');
+        setShowBatchNumber(true);
+        setShowSerialNumber(false);
+        setShowMfgDate(true);
+        setShowExpiryDate(true);
+      } else if (hasSerial) {
+        setPrintMode('SERIAL');
+        setShowBatchNumber(false);
+        setShowSerialNumber(true);
+        setShowMfgDate(false);
+        setShowExpiryDate(false);
+      } else {
+        setPrintMode('NONE');
+        setShowBatchNumber(false);
+        setShowSerialNumber(false);
+        setShowMfgDate(false);
+        setShowExpiryDate(false);
+      }
     } catch (err) {
       console.error('Failed to load item details for printing', err);
       // Fallback to props
@@ -223,6 +261,13 @@ export default function BarcodePrintDialog({
       setPrintMfgDate('');
       setPrintExpiryDate('');
       setPrintUOM('');
+      setTrackBatch(false);
+      setTrackSerial(false);
+      setPrintMode('NONE');
+      setShowBatchNumber(false);
+      setShowSerialNumber(false);
+      setShowMfgDate(false);
+      setShowExpiryDate(false);
     } finally {
       setLoadingDetails(false);
     }
@@ -299,11 +344,13 @@ export default function BarcodePrintDialog({
       const typeLower = activeBarcodeType.toLowerCase();
       const includeDigits = activeBarcodeType !== 'QRCODE' && showBarcodeNumber;
       
-      const barcodeImgUrl = `/api/barcode/generate?text=${encodeURIComponent(barcodeVal)}&type=${typeLower}&scale=${barcodeWidth}&height=${barcodeHeight}&includetext=${includeDigits}`;
+      const activePrintWidth = barcodeWidth;
+      const activePrintHeight = isBin ? 28 : barcodeHeight;
+      const barcodeImgUrl = `/api/barcode/generate?text=${encodeURIComponent(barcodeVal)}&type=${typeLower}&scale=${activePrintWidth}&height=${activePrintHeight}&includetext=${includeDigits}`;
 
       const barcodeSection = `
-        <div class="barcode-box" style="height: ${barcodeHeight}px; display: flex; justify-content: center; align-items: center; margin-top: 2px; margin-bottom: 2px;">
-          <img src="${barcodeImgUrl}" style="max-height: 100%; max-width: 100%; object-fit: contain;" />
+        <div class="barcode-box" style="height: ${activePrintHeight}px; display: flex; justify-content: center; align-items: center; margin-top: 2px; margin-bottom: 2px;">
+          <img src="${barcodeImgUrl}" style="max-height: 100%; max-width: 95%; object-fit: contain; image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rendering: crisp-edges; -ms-interpolation-mode: nearest-neighbor;" />
         </div>
       `;
 
@@ -485,6 +532,10 @@ export default function BarcodePrintDialog({
     printWindow.document.close();
   };
 
+  const previewBarcodeVal = showSerialNumber && printSerialNumber 
+    ? `${printSerialNumber}-1`
+    : printBarcodeNumber;
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
       <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -537,6 +588,36 @@ export default function BarcodePrintDialog({
                   />
                 </Grid>
               </Grid>
+
+              {trackBatch && trackSerial && (
+                <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: 'primary.main', bgcolor: 'action.hover', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" fontWeight={700} color="primary" sx={{ mb: 0.5 }}>
+                    Select Tracking Mode to Print:
+                  </Typography>
+                  <RadioGroup
+                    row
+                    value={printMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as 'BATCH' | 'SERIAL';
+                      setPrintMode(mode);
+                      if (mode === 'BATCH') {
+                        setShowBatchNumber(true);
+                        setShowSerialNumber(false);
+                        setShowMfgDate(true);
+                        setShowExpiryDate(true);
+                      } else {
+                        setShowBatchNumber(false);
+                        setShowSerialNumber(true);
+                        setShowMfgDate(false);
+                        setShowExpiryDate(false);
+                      }
+                    }}
+                  >
+                    <FormControlLabel value="BATCH" control={<Radio size="small" />} label="Batch Details" />
+                    <FormControlLabel value="SERIAL" control={<Radio size="small" />} label="Serial Number Details" />
+                  </RadioGroup>
+                </Paper>
+              )}
 
               {/* Data Display - strictly static read-only database values */}
               <Accordion defaultExpanded variant="outlined" sx={{ mb: 2, borderRadius: 1 }}>
@@ -620,8 +701,8 @@ export default function BarcodePrintDialog({
                             onChange={(e) => setPrintBatchNumber(e.target.value)}
                             size="small" 
                             fullWidth 
-                            disabled={isBin}
-                            helperText={isBin ? "Not applicable for Bins" : "Source: Batch Master (Editable)"}
+                            disabled={isBin || printMode !== 'BATCH'}
+                            helperText={isBin ? "Not applicable for Bins" : printMode !== 'BATCH' ? "Batch mode not selected/active" : "Source: Batch Master (Editable)"}
                           />
                         </Grid>
                         <Grid item xs={6} sm={4}>
@@ -631,8 +712,8 @@ export default function BarcodePrintDialog({
                             onChange={(e) => setPrintSerialNumber(e.target.value)}
                             size="small" 
                             fullWidth 
-                            disabled={isBin}
-                            helperText={isBin ? "Not applicable for Bins" : "Source: Serial Number Master (Editable)"}
+                            disabled={isBin || printMode !== 'SERIAL'}
+                            helperText={isBin ? "Not applicable for Bins" : printMode !== 'SERIAL' ? "Serial mode not selected/active" : "Source: Serial Number Master (Editable)"}
                           />
                         </Grid>
                         <Grid item xs={6} sm={4}>
@@ -664,8 +745,8 @@ export default function BarcodePrintDialog({
                             onChange={(e) => setPrintMfgDate(e.target.value)}
                             size="small" 
                             fullWidth 
-                            disabled={isBin}
-                            helperText={isBin ? "Not applicable for Bins" : "Source: Batch Master (Editable)"}
+                            disabled={isBin || printMode !== 'BATCH'}
+                            helperText={isBin ? "Not applicable for Bins" : printMode !== 'BATCH' ? "Batch mode not selected/active" : "Source: Batch Master (Editable)"}
                           />
                         </Grid>
                         <Grid item xs={6} sm={4}>
@@ -675,8 +756,8 @@ export default function BarcodePrintDialog({
                             onChange={(e) => setPrintExpiryDate(e.target.value)}
                             size="small" 
                             fullWidth 
-                            disabled={isBin}
-                            helperText={isBin ? "Not applicable for Bins" : "Source: Batch Master (Editable)"}
+                            disabled={isBin || printMode !== 'BATCH'}
+                            helperText={isBin ? "Not applicable for Bins" : printMode !== 'BATCH' ? "Batch mode not selected/active" : "Source: Batch Master (Editable)"}
                           />
                         </Grid>
                       </Grid>
@@ -794,12 +875,12 @@ export default function BarcodePrintDialog({
                     <FormControlLabel control={<Checkbox checked={showSKU} onChange={(e) => setShowSKU(e.target.checked)} disabled={isBin} />} label="SKU" />
                     <FormControlLabel control={<Checkbox checked={showUOM} onChange={(e) => setShowUOM(e.target.checked)} disabled={isBin} />} label="Unit (UOM)" />
                     <FormControlLabel control={<Checkbox checked={showBarcodeNumber} onChange={(e) => setShowBarcodeNumber(e.target.checked)} />} label={isBin ? "Bin Barcode" : "Barcode Digits"} />
-                    <FormControlLabel control={<Checkbox checked={showBatchNumber} onChange={(e) => setShowBatchNumber(e.target.checked)} disabled={isBin} />} label="Batch" />
-                    <FormControlLabel control={<Checkbox checked={showSerialNumber} onChange={(e) => setShowSerialNumber(e.target.checked)} disabled={isBin} />} label="Serial No" />
+                    <FormControlLabel control={<Checkbox checked={showBatchNumber} onChange={(e) => setShowBatchNumber(e.target.checked)} disabled={isBin || printMode !== 'BATCH'} />} label="Batch" />
+                    <FormControlLabel control={<Checkbox checked={showSerialNumber} onChange={(e) => setShowSerialNumber(e.target.checked)} disabled={isBin || printMode !== 'SERIAL'} />} label="Serial No" />
                     <FormControlLabel control={<Checkbox checked={showMRP} onChange={(e) => setShowMRP(e.target.checked)} disabled={isBin} />} label="MRP Price" />
                     <FormControlLabel control={<Checkbox checked={showSalePrice} onChange={(e) => setShowSalePrice(e.target.checked)} disabled={isBin} />} label="Sale Price" />
-                    <FormControlLabel control={<Checkbox checked={showMfgDate} onChange={(e) => setShowMfgDate(e.target.checked)} disabled={isBin} />} label="Mfg Date" />
-                    <FormControlLabel control={<Checkbox checked={showExpiryDate} onChange={(e) => setShowExpiryDate(e.target.checked)} disabled={isBin} />} label="Expiry Date" />
+                    <FormControlLabel control={<Checkbox checked={showMfgDate} onChange={(e) => setShowMfgDate(e.target.checked)} disabled={isBin || printMode !== 'BATCH'} />} label="Mfg Date" />
+                    <FormControlLabel control={<Checkbox checked={showExpiryDate} onChange={(e) => setShowExpiryDate(e.target.checked)} disabled={isBin || printMode !== 'BATCH'} />} label="Expiry Date" />
                   </Box>
                 </AccordionDetails>
               </Accordion>
@@ -910,17 +991,17 @@ export default function BarcodePrintDialog({
                   </Box>
 
                   {/* Render simulated barcode preview via backend generation endpoint */}
-                  <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', my: 0.5, height: `${barcodeHeight}px`, maxHeight: '45%' }}>
+                  <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', my: 0.5, height: `${isBin ? 28 : barcodeHeight}px`, maxHeight: '45%' }}>
                     {barcodeType === 'QRCODE' ? (
                       <img 
-                        src={`/api/barcode/generate?text=${encodeURIComponent(printBarcodeNumber)}&type=qrcode&scale=${barcodeWidth}`} 
-                        style={{ height: '100%', width: 'auto', objectFit: 'contain' }} 
+                        src={`/api/barcode/generate?text=${encodeURIComponent(previewBarcodeVal)}&type=qrcode&scale=${barcodeWidth}`} 
+                        style={{ height: '100%', width: 'auto', objectFit: 'contain', imageRendering: 'pixelated' }} 
                         alt="QR Code"
                       />
                     ) : (
                       <img 
-                        src={`/api/barcode/generate?text=${encodeURIComponent(printBarcodeNumber)}&type=${barcodeType.toLowerCase()}&scale=${barcodeWidth}&height=${barcodeHeight}&includetext=${showBarcodeNumber ? 'true' : 'false'}`} 
-                        style={{ height: '100%', maxWidth: '100%', objectFit: 'contain' }} 
+                        src={`/api/barcode/generate?text=${encodeURIComponent(previewBarcodeVal)}&type=${barcodeType.toLowerCase()}&scale=${barcodeWidth}&height=${isBin ? 28 : barcodeHeight}&includetext=${showBarcodeNumber ? 'true' : 'false'}`} 
+                        style={{ height: '100%', maxWidth: '90%', objectFit: 'contain', imageRendering: 'pixelated' }} 
                         alt="Barcode"
                       />
                     )}

@@ -3,7 +3,7 @@ import {
   Box, Typography, Button, Card, Table, TableBody, TableCell, 
   TableContainer, TableHead, TableRow, CircularProgress, Alert, 
   Chip, Grid, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, 
-  ListItemText, Divider, Autocomplete, TextField, Switch, FormControlLabel, IconButton, InputAdornment
+  ListItemText, Divider, Autocomplete, TextField, Switch, FormControlLabel, IconButton, InputAdornment, Tooltip
 } from '@mui/material';
 import { RefreshCw, CheckCircle2, XCircle, Play, ShoppingCart, Plus, Edit2, Trash2, X, PlusCircle, FileDown, Search } from 'lucide-react';
 import api from '../../services/api';
@@ -347,15 +347,26 @@ export default function SyncSO() {
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const renderStatusChip = (status: string) => {
     switch (status) {
-      case 'RESERVED': return 'success';
-      case 'PARTIAL_RESERVED': return 'warning';
-      case 'PICKING': return 'info';
-      case 'PICKED': return 'secondary';
-      case 'PACKED': return 'secondary';
-      case 'DISPATCHED': return 'success';
-      default: return 'default';
+      case 'PENDING':
+        return <Chip label="Pending Reservation" color="default" size="small" sx={{ fontWeight: 600 }} />;
+      case 'PARTIAL_RESERVED':
+        return <Chip label="Partially Reserved" color="warning" size="small" sx={{ fontWeight: 600 }} />;
+      case 'RESERVED':
+        return <Chip label="Stock Reserved" color="success" size="small" sx={{ fontWeight: 600 }} />;
+      case 'PICKING':
+        return <Chip label="Picking in Progress" color="info" size="small" sx={{ fontWeight: 600 }} />;
+      case 'PICKED':
+        return <Chip label="Picked (Ready to Pack)" color="primary" size="small" sx={{ fontWeight: 600 }} />;
+      case 'PACKED':
+        return <Chip label="Packed (Ready to Dispatch)" color="info" size="small" sx={{ fontWeight: 600, backgroundColor: '#0284c7', color: '#fff' }} />;
+      case 'DISPATCHED':
+        return <Chip label="Dispatched" color="success" size="small" sx={{ fontWeight: 600 }} />;
+      case 'CANCELLED':
+        return <Chip label="Cancelled" color="error" size="small" sx={{ fontWeight: 600 }} />;
+      default:
+        return <Chip label={status || 'Pending'} size="small" sx={{ fontWeight: 600 }} />;
     }
   };
 
@@ -420,12 +431,12 @@ export default function SyncSO() {
           value={statusInput}
           onChange={(v) => setStatusInput(v)}
           options={[
-            { value: 'PENDING', label: 'Pending' },
-            { value: 'RESERVED', label: 'Reserved' },
-            { value: 'PARTIAL_RESERVED', label: 'Partial Reserved' },
-            { value: 'PICKING', label: 'Picking' },
-            { value: 'PICKED', label: 'Picked' },
-            { value: 'PACKED', label: 'Packed' },
+            { value: 'PENDING', label: 'Pending Reservation' },
+            { value: 'PARTIAL_RESERVED', label: 'Partially Reserved' },
+            { value: 'RESERVED', label: 'Stock Reserved' },
+            { value: 'PICKING', label: 'Picking in Progress' },
+            { value: 'PICKED', label: 'Picked (Ready to Pack)' },
+            { value: 'PACKED', label: 'Packed (Ready to Dispatch)' },
             { value: 'DISPATCHED', label: 'Dispatched' },
           ]}
         />
@@ -472,25 +483,35 @@ export default function SyncSO() {
                     <TableCell>{so.Salesman || 'N/A'}</TableCell>
                     <TableCell>{new Date(so.OrderDate).toLocaleDateString()}</TableCell>
                     <TableCell>
-                      <Chip label={so.Status} color={getStatusColor(so.Status)} size="small" sx={{ fontWeight: 600 }} />
+                      {renderStatusChip(so.Status)}
                     </TableCell>
                     <TableCell>
                       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', alignItems: 'center' }}>
                         <Button size="small" variant="outlined" onClick={() => viewDetails(so)}>Lines</Button>
                         
-                        {so.Status === 'PENDING' && (
-                          <Button 
-                            size="small" 
-                            variant="contained" 
-                            color="success" 
-                            disabled={reserving === so.SOId}
-                            onClick={() => handleReserve(so.SOId)}
+                        {(so.Status === 'PENDING' || so.Status === 'PARTIAL_RESERVED') && (
+                          <Tooltip 
+                            title={
+                              Number(so.TotalAvailableBinStock || 0) === 0
+                                ? 'No items found in any bin for this order'
+                                : 'Auto reserve stock from available bins'
+                            }
                           >
-                            {reserving === so.SOId ? 'Reserving...' : 'Auto Reserve'}
-                          </Button>
+                            <span>
+                              <Button 
+                                size="small" 
+                                variant="contained" 
+                                color={so.Status === 'PARTIAL_RESERVED' ? 'warning' : 'success'} 
+                                disabled={reserving === so.SOId || Number(so.TotalAvailableBinStock || 0) === 0}
+                                onClick={() => handleReserve(so.SOId)}
+                              >
+                                {reserving === so.SOId ? 'Reserving...' : (so.Status === 'PARTIAL_RESERVED' ? 'Reserve Rest' : 'Auto Reserve')}
+                              </Button>
+                            </span>
+                          </Tooltip>
                         )}
 
-                        {so.Status.includes('RESERVED') && (
+                        {so.Status === 'RESERVED' && (
                           <Button 
                             size="small" 
                             variant="outlined" 
@@ -545,9 +566,12 @@ export default function SyncSO() {
                     <ListItemText
                       primary={<Typography variant="body2" sx={{ fontWeight: 600 }}>{line.ItemName} ({line.ItemCode})</Typography>}
                       secondary={
-                        <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
+                        <Box sx={{ display: 'flex', gap: 2, mt: 0.5, flexWrap: 'wrap' }}>
                           <Typography variant="caption">Ordered Qty: <b>{line.OrderQty} {line.UOM}</b></Typography>
                           <Typography variant="caption" color="success.main">Reserved Qty: <b>{line.ReservedQty} {line.UOM}</b></Typography>
+                          <Typography variant="caption" color={Number(line.AvailableInBins || 0) > 0 ? 'info.main' : 'error.main'}>
+                            Avail in Bins: <b>{line.AvailableInBins || 0} {line.UOM}</b>
+                          </Typography>
                           <Typography variant="caption" color="primary.main">Picked Qty: <b>{line.PickedQty} {line.UOM}</b></Typography>
                         </Box>
                       }

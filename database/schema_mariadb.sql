@@ -904,7 +904,7 @@ FROM tblGRNDetail gd
 INNER JOIN tblGRN g ON gd.GRNId = g.GRNId
 INNER JOIN tblItem item ON gd.ItemId = item.ItemId
 LEFT JOIN tblBatch batch ON gd.BatchId = batch.BatchId
-WHERE g.Status = 'QC_COMPLETED' AND (gd.AcceptedQty - gd.PutawayQty) > 0;
+WHERE g.Status IN ('QC_COMPLETED', 'PARTIAL_PUTAWAY') AND (gd.AcceptedQty - gd.PutawayQty) > 0;
 
 CREATE VIEW vw_PendingPick AS
 SELECT 
@@ -964,6 +964,7 @@ CREATE PROCEDURE sp_AllocateBinForPutaway(
 BEGIN
     DECLARE v_ItemWeight DECIMAL(18,3);
     DECLARE v_ItemVolume DECIMAL(18,3);
+    DECLARE v_TotalExistingCapacity DECIMAL(18,3);
     
     SELECT 
         CASE WHEN COALESCE(Weight, 0) > 0 THEN Weight ELSE 2.0 END,
@@ -1025,7 +1026,7 @@ BEGIN
         ORDER BY (b.CapacityWeight - b.OccupiedWeight) ASC
         LIMIT 5;
     ELSE
-        -- Return existing bins PLUS up to 2 empty bins
+        -- Return existing bins PLUS up to 5 empty/partially occupied bins (prioritizing empty)
         SELECT * FROM (
             SELECT 
                 b.BinId,
@@ -1082,9 +1083,11 @@ BEGIN
               AND (b.CapacityWeight - b.OccupiedWeight) >= v_ItemWeight
               AND (b.CapacityVolume - b.OccupiedVolume) >= v_ItemVolume
               AND NOT EXISTS (
-                  SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.Quantity > 0
+                  SELECT 1 FROM tblInventory i3 WHERE i3.BinId = b.BinId AND i3.ItemId != p_ItemId AND i3.Quantity > 0
               )
-            ORDER BY (b.CapacityWeight - b.OccupiedWeight) ASC
+            ORDER BY 
+              (EXISTS (SELECT 1 FROM tblInventory i2 WHERE i2.BinId = b.BinId AND i2.Quantity > 0)) ASC,
+              (b.CapacityWeight - b.OccupiedWeight) DESC
             LIMIT 2
         ) AS empty_bins
         ORDER BY HasExistingStock DESC, AvailableWeight ASC
@@ -1348,6 +1351,8 @@ BEGIN
 
     IF v_TotalPutaway >= v_TotalAccepted THEN
         UPDATE tblGRN SET Status = 'PUTAWAY_COMPLETED' WHERE GRNId = v_GRNId;
+    ELSE
+        UPDATE tblGRN SET Status = 'PARTIAL_PUTAWAY' WHERE GRNId = v_GRNId;
     END IF;
 
     COMMIT;

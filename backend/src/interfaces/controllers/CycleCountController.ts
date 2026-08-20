@@ -74,15 +74,22 @@ export class CycleCountController {
   // Get list of cycle count runs
   public static async getCycleCounts(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query(`
+      const q = (req.query.q || req.query.search || '') as string;
+      let sql = `
         SELECT cc.*, w.Name AS WarehouseName, z.Name AS ZoneName, u1.FullName AS CountedByName, u2.FullName AS ReviewedByName
         FROM tblCycleCount cc
         INNER JOIN tblWarehouse w ON cc.WarehouseId = w.WarehouseId
         LEFT JOIN tblZone z ON cc.ZoneId = z.ZoneId
         INNER JOIN tblUser u1 ON cc.CountedBy = u1.UserId
         LEFT JOIN tblUser u2 ON cc.ReviewedBy = u2.UserId
-        ORDER BY cc.CycleCountId DESC
-      `);
+      `;
+      const params: any = {};
+      if (q.trim()) {
+        sql += ` WHERE (cc.CountCode LIKE @search OR cc.Status LIKE @search OR w.Name LIKE @search OR z.Name LIKE @search OR u1.FullName LIKE @search)`;
+        params.search = `%${q.trim()}%`;
+      }
+      sql += ` ORDER BY cc.CycleCountId DESC`;
+      const rows = await db.query(sql, params);
       return res.json(rows);
     } catch (err: any) {
       return res.status(500).json({ message: err.message });

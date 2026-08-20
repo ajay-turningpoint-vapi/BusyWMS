@@ -46,10 +46,13 @@ export default function Picking() {
     setLocatorOpen(true);
   };
 
-  const loadData = async () => {
+  const [statusFilter, setStatusFilter] = useState('ACTIVE');
+
+  const loadData = async (status = statusFilter) => {
     setLoading(true);
     try {
-      const res = await api.get('/outbound/pick-lists');
+      const param = status === 'ACTIVE' ? '' : status;
+      const res = await api.get(`/outbound/pick-lists?status=${param}`);
       setPickLists(res.data);
       setLoading(false);
     } catch (err) {
@@ -209,9 +212,24 @@ export default function Picking() {
       {success && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess('')}>{success}</Alert>}
       {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>{error}</Alert>}
 
-      {/* Search Bar */}
-      <Box sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center' }}>
+      {/* Search Bar & Status Filter */}
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
         <SearchBar value={searchQuery} onChange={(v) => { setSearchQuery(v); pagination.resetPage(); }} placeholder="Search Pick Code, SO, Creator..." />
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <Select 
+            value={statusFilter} 
+            onChange={(e) => {
+              const val = e.target.value;
+              setStatusFilter(val);
+              loadData(val);
+            }}
+          >
+            <MenuItem value="ACTIVE">Active Picking</MenuItem>
+            <MenuItem value="COMPLETED">Completed</MenuItem>
+            <MenuItem value="PACKED">Packed</MenuItem>
+            <MenuItem value="ALL">All Pick Lists</MenuItem>
+          </Select>
+        </FormControl>
         <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
           {filteredPickLists.length} of {pickLists.length} lists
         </Typography>
@@ -242,14 +260,18 @@ export default function Picking() {
                     <TableCell>
                       <Chip 
                         label={list.Status} 
-                        color={list.Status === 'COMPLETED' ? 'success' : 'warning'} 
+                        color={
+                          list.Status === 'COMPLETED' ? 'success' :
+                          list.Status === 'PACKED' ? 'info' :
+                          list.Status === 'DISPATCHED' ? 'secondary' : 'warning'
+                        } 
                         size="small" 
                         sx={{ fontWeight: 600 }} 
                       />
                     </TableCell>
                     <TableCell>{new Date(list.CreatedAt).toLocaleDateString()}</TableCell>
                     <TableCell>
-                      {list.Status !== 'COMPLETED' && (
+                      {['PENDING', 'IN_PROGRESS', 'PICKING'].includes(list.Status) ? (
                         <Button 
                           variant="outlined" 
                           size="small" 
@@ -258,6 +280,10 @@ export default function Picking() {
                         >
                           Execute Pick
                         </Button>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', fontWeight: 600 }}>
+                          {list.Status === 'COMPLETED' ? 'Picked' : (list.Status === 'PACKED' ? 'Packed' : 'Done')}
+                        </Typography>
                       )}
                     </TableCell>
                   </TableRow>

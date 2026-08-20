@@ -1,4 +1,4 @@
-﻿import { db } from '../config/db';
+import { db } from '../config/db';
 
 export interface OrderItemInput {
   ItemId?: number;
@@ -69,14 +69,29 @@ export class OrderValidator {
           continue;
         }
         
-        // Resolve item from db
+        // Resolve item from db: try Code first (ERP numeric code e.g. 642249),
+        // then Alias as fallback (human-readable WMS code e.g. KNH0100),
+        // then Barcode as last resort.
         let dbItem: any = null;
         if (item.ItemId) {
           const res = await db.query('SELECT ItemId, Code, Name, UOM FROM tblItem WHERE ItemId = @ItemId', { ItemId: item.ItemId });
           if (res.length > 0) dbItem = res[0];
         } else if (item.ItemCode) {
+          // 1. Try exact Code match (ERP numeric code stored in tblItem.Code)
           const res = await db.query('SELECT ItemId, Code, Name, UOM FROM tblItem WHERE Code = @ItemCode', { ItemCode: item.ItemCode });
-          if (res.length > 0) dbItem = res[0];
+          if (res.length > 0) {
+            dbItem = res[0];
+          } else {
+            // 2. Fallback: try by Alias (human-readable code like KNH0100)
+            const res2 = await db.query('SELECT ItemId, Code, Name, UOM FROM tblItem WHERE Alias = @ItemCode', { ItemCode: item.ItemCode });
+            if (res2.length > 0) {
+              dbItem = res2[0];
+            } else {
+              // 3. Last resort: try by Barcode
+              const res3 = await db.query('SELECT ItemId, Code, Name, UOM FROM tblItem WHERE Barcode = @ItemCode', { ItemCode: item.ItemCode });
+              if (res3.length > 0) dbItem = res3[0];
+            }
+          }
         }
         
         if (!dbItem) {

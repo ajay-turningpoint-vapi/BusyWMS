@@ -403,6 +403,8 @@ BEGIN
 
         IF @TotalPutaway >= @TotalAccepted
             UPDATE tblGRN SET Status = 'PUTAWAY_COMPLETED' WHERE GRNId = @GRNId;
+        ELSE
+            UPDATE tblGRN SET Status = 'PARTIAL_PUTAWAY' WHERE GRNId = @GRNId;
 
         COMMIT TRANSACTION;
         SELECT 1 AS Success, 'Putaway executed successfully.' AS Message;

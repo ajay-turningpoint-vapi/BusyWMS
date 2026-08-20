@@ -62,9 +62,9 @@ export class InventoryController {
       return res.status(400).json({ message: 'fromBinId, toBinId, itemId and quantity are required' });
     }
 
-    // BUG-030 FIX: Prevent same-bin transfers
+    // Prevent same-bin transfers
     if (Number(fromBinId) === Number(toBinId)) {
-      return res.status(400).json({ message: 'Source and destination bins must be different' });
+      return res.status(400).json({ message: 'Source and destination bins cannot be the same bin.' });
     }
 
     try {
@@ -117,11 +117,11 @@ export class InventoryController {
         return res.status(400).json({ message: 'Destination bin not found' });
       }
       const dbInfo = destBinInfo[0];
-      if (dbInfo.OccupiedWeight + weightDelta > dbInfo.CapacityWeight) {
-        return res.status(400).json({ message: `Destination bin '${dbInfo.Code}' exceeds weight capacity. Storing this would exceed limit of ${dbInfo.CapacityWeight}kg.` });
+      if (dbInfo.CapacityWeight > 0 && (dbInfo.OccupiedWeight + weightDelta > dbInfo.CapacityWeight)) {
+        return res.status(400).json({ message: `Destination bin '${dbInfo.Code}' exceeds weight capacity limit of ${dbInfo.CapacityWeight}kg.` });
       }
-      if (dbInfo.OccupiedVolume + volumeDelta > dbInfo.CapacityVolume) {
-        return res.status(400).json({ message: `Destination bin '${dbInfo.Code}' exceeds volume capacity. Storing this would exceed limit of ${dbInfo.CapacityVolume}L.` });
+      if (dbInfo.CapacityVolume > 0 && (dbInfo.OccupiedVolume + volumeDelta > dbInfo.CapacityVolume)) {
+        return res.status(400).json({ message: `Destination bin '${dbInfo.Code}' exceeds volume capacity limit of ${dbInfo.CapacityVolume}L.` });
       }
 
       const transferCode = await db.transaction(async (tx) => {
@@ -369,7 +369,7 @@ export class InventoryController {
         dataSql = `
           SELECT 
             i.ItemId,
-            COALESCE(NULLIF(i.Alias, ''), i.Code) AS ItemCode,
+            i.Code AS ItemCode,
             i.Code AS ERPCode,
             i.Name AS ItemName,
             i.Category,
@@ -417,7 +417,7 @@ export class InventoryController {
         dataSql = `
           SELECT 
             inv.ItemId,
-            COALESCE(NULLIF(i.Alias, ''), i.Code) AS ItemCode,
+            i.Code AS ItemCode,
             i.Code AS ERPCode,
             i.Name AS ItemName,
             i.Category,
@@ -478,7 +478,7 @@ export class InventoryController {
         dataSql = `
           SELECT 
             i.ItemId,
-            COALESCE(NULLIF(i.Alias, ''), i.Code) AS ItemCode,
+            i.Code AS ItemCode,
             i.Code AS ERPCode,
             i.Name AS ItemName,
             i.Category,
@@ -555,7 +555,7 @@ export class InventoryController {
 
     try {
       const itemInfo = await db.query(`
-        SELECT ItemId, COALESCE(NULLIF(Alias, ''), Code) AS ItemCode, Code AS ERPCode, Name AS ItemName, UOM, COALESCE(MinStock, 0) AS MinStock, COALESCE(MaxStock, 0) AS MaxStock
+        SELECT ItemId, Code AS ItemCode, Code AS ERPCode, Name AS ItemName, UOM, COALESCE(MinStock, 0) AS MinStock, COALESCE(MaxStock, 0) AS MaxStock
         FROM tblItem WHERE ItemId = @itemId
       `, { itemId });
 

@@ -50,6 +50,11 @@ export class ASNController {
         sql += ` AND asn.Status = @status`;
         params.status = status;
       }
+      const search = (req.query.search || req.query.q || '') as string;
+      if (search.trim()) {
+        sql += ` AND (asn.ASNCode LIKE @search OR s.Name LIKE @search OR asn.InvoiceNo LIKE @search OR po.POCode LIKE @search)`;
+        params.search = `%${search.trim()}%`;
+      }
 
       sql += ` ORDER BY asn.ASNId DESC`;
 

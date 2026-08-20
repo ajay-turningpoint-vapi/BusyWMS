@@ -449,7 +449,8 @@ export class SyncController {
         const codesArray = Array.from(uniqueItemCodes);
         const existingResults = await Promise.all(
           codesArray.map(async (code) => {
-            const res = await db.query('SELECT ItemId FROM tblItem WHERE Code = @code', { code });
+            // Check by Code first (ERP numeric code), then by Alias (human-readable)
+            const res = await db.query('SELECT ItemId FROM tblItem WHERE Code = @code OR Alias = @code', { code });
             return { code, exists: res.length > 0 };
           })
         );
@@ -709,7 +710,8 @@ export class SyncController {
         const codesArray = Array.from(uniqueItemCodes);
         const existingResults = await Promise.all(
           codesArray.map(async (code) => {
-            const res = await db.query('SELECT ItemId FROM tblItem WHERE Code = @code', { code });
+            // Check by Code first (ERP numeric code), then by Alias (human-readable)
+            const res = await db.query('SELECT ItemId FROM tblItem WHERE Code = @code OR Alias = @code', { code });
             return { code, exists: res.length > 0 };
           })
         );
@@ -1214,9 +1216,10 @@ export class SyncController {
       if (!vouNo) continue;
 
       const vendorName = row.PARTY ? String(row.PARTY).trim() : '';
+      const erpCode = row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : null;
       const alias = row.ALIAS ? String(row.ALIAS).trim() : null;
-      // ItemCode: use ALIAS (barcode/SKU) if available, else fall back to ITEM_ERP_CODE
-      const itemCode = alias || (row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : '');
+      // ItemCode: use ITEM_ERP_CODE (ERP numeric code) to match tblItem.Code
+      const itemCode = erpCode || alias || '';
       if (!itemCode) continue;
 
       if (!poMap.has(vouNo)) {
@@ -1390,7 +1393,11 @@ export class SyncController {
       
       const customerName = row.PARTYNAME ? String(row.PARTYNAME).trim() : '';
       const customerCode = row.PARTY_CODE ? String(row.PARTY_CODE).trim() : customerName;
-      const itemCode = row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : (row.ALIAS ? String(row.ALIAS).trim() : '');
+      // Use ITEM_ERP_CODE (e.g. 642249) as the WMS item code — this matches how items are stored
+      // in tblItem.Code via the item master sync (syncItems uses ERP CODE as tblItem.Code).
+      const erpCode = row.ITEM_ERP_CODE ? String(row.ITEM_ERP_CODE).trim() : null;
+      const alias = row.ALIAS ? String(row.ALIAS).trim() : null;
+      const itemCode = erpCode || alias || '';
       if (!itemCode) continue;
 
       if (!soMap.has(vouNo)) {
@@ -1405,8 +1412,8 @@ export class SyncController {
       }
 
       soMap.get(vouNo).Items.push({
-        ItemCode: itemCode,
-        Alias: row.ALIAS ? String(row.ALIAS).trim() : null,
+        ItemCode: itemCode,   // ERP numeric code (e.g. 642249) — matches tblItem.Code
+        Alias: alias,         // Human-readable code (e.g. KNH0100) — stored in tblItem.Alias
         ItemName: row.ITEM ? String(row.ITEM).trim() : itemCode,
         ItemGrp: row.ITEM_GRP ? String(row.ITEM_GRP).trim() : 'General',
         OrderQty: Math.abs(row.QTY || 0),

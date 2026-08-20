@@ -33,9 +33,10 @@ export default function Dispatch() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/outbound/sales-orders');
-      // Show orders ready to be dispatched: PACKED (also fallback to PICKED for developer testing)
-      setPackedOrders(res.data.filter((so: any) => so.Status === 'PACKED' || so.Status === 'PICKED'));
+      const res = await api.get('/outbound/sales-orders?status=PACKED');
+      const data = Array.isArray(res.data) ? res.data : (res.data?.items || []);
+      // Show orders ready to be dispatched: ONLY PACKED
+      setPackedOrders(data.filter((so: any) => so.Status === 'PACKED'));
       setLoading(false);
     } catch (err) {
       setError('Failed to fetch dispatch queue');
@@ -145,7 +146,12 @@ export default function Dispatch() {
                     <TableCell><TransactionLink type="SO" id={so.SOCode} /></TableCell>
                     <TableCell>{so.CustomerName}</TableCell>
                     <TableCell>
-                      <Chip label={so.Status} color="secondary" size="small" sx={{ fontWeight: 600 }} />
+                      <Chip 
+                        label="Packed (Ready to Dispatch)" 
+                        color="info" 
+                        size="small" 
+                        sx={{ fontWeight: 600, backgroundColor: '#0284c7', color: '#fff' }} 
+                      />
                     </TableCell>
                     <TableCell>{new Date(so.OrderDate).toLocaleDateString()}</TableCell>
                     <TableCell>

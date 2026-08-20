@@ -4,10 +4,16 @@ import { AuthenticatedRequest } from '../middlewares/auth';
 
 export class PutawayController {
 
-  // Get items waiting to be slotted into bins
   public static async getPendingPutaway(req: AuthenticatedRequest, res: Response) {
     try {
-      const rows = await db.query('SELECT * FROM vw_PendingPutaway');
+      const q = (req.query.q || req.query.search || '') as string;
+      let sql = 'SELECT * FROM vw_PendingPutaway';
+      const params: any = {};
+      if (q.trim()) {
+        sql += ' WHERE (ItemCode LIKE @search OR ItemName LIKE @search OR GRNCode LIKE @search OR BatchNumber LIKE @search)';
+        params.search = `%${q.trim()}%`;
+      }
+      const rows = await db.query(sql, params);
       return res.json(rows);
     } catch (err: any) {
       return res.status(500).json({ message: err.message });
@@ -66,6 +72,25 @@ export class PutawayController {
     }
 
     try {
+      // Check if target bin already contains any other item with active quantity
+      const itemRows = await db.query('SELECT ItemId FROM tblGRNDetail WHERE GRNDetailId = @grnDetailId', { grnDetailId });
+      if (itemRows.length > 0) {
+        const itemId = itemRows[0].ItemId;
+        const conflictingInventory = await db.query(`
+          SELECT i.ItemId, it.Name AS ItemName 
+          FROM tblInventory i
+          INNER JOIN tblItem it ON i.ItemId = it.ItemId
+          WHERE i.BinId = @binId AND i.ItemId != @itemId AND i.Quantity > 0
+        `, { binId, itemId });
+
+        if (conflictingInventory.length > 0) {
+          const confName = conflictingInventory[0].ItemName || conflictingInventory[0].ItemId;
+          return res.status(400).json({ 
+            message: `Putaway failed: Target bin already contains a different item ("${confName}"). Mixing items in the same bin is not allowed.` 
+          });
+        }
+      }
+
       // Execute the process putaway transaction stored procedure
       const result = await db.executeSp('sp_ProcessPutaway', {
         GRNDetailId: grnDetailId,
@@ -110,6 +135,30 @@ export class PutawayController {
         }
       } catch (alertErr) {
         console.error('Failed to automatically resolve stock alerts:', alertErr);
+      }
+
+      // Auto-reserve any pending or partial Sales Orders waiting for this item
+      try {
+        const detailRows = await db.query('SELECT ItemId FROM tblGRNDetail WHERE GRNDetailId = @grnDetailId', { grnDetailId });
+        if (detailRows.length > 0) {
+          const itemId = detailRows[0].ItemId;
+          const pendingSOs = await db.query(`
+            SELECT DISTINCT so.SOId 
+            FROM tblSalesOrder so
+            JOIN tblSalesOrderDetail sod ON so.SOId = sod.SOId
+            WHERE sod.ItemId = @itemId AND so.Status IN ('PENDING', 'PARTIAL_RESERVED')
+          `, { itemId });
+
+          for (const pendingSo of pendingSOs) {
+            try {
+              await db.executeSp('sp_ReserveInventory', { SOId: pendingSo.SOId, UserId: userId });
+            } catch (resErr) {
+              console.error(`Auto-reservation failed for SO ${pendingSo.SOId}:`, resErr);
+            }
+          }
+        }
+      } catch (reserveErr) {
+        console.error('Failed auto-reservation check after putaway:', reserveErr);
       }
 
       return res.json({ message: 'Putaway completed successfully' });

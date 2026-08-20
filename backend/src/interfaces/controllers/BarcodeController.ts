@@ -64,7 +64,7 @@ export class BarcodeController {
           FROM tblItem 
           WHERE Barcode = @barcode OR Code = @barcode
         `, { barcode });
-        
+
         if (items.length === 0) {
           return res.status(404).json({ valid: false, message: 'Item barcode not found' });
         }
@@ -120,10 +120,11 @@ export class BarcodeController {
     }
 
     try {
+      // Look up by Code first (ERP numeric), then Alias (human-readable e.g. KNH0100), then Barcode
       const items = await db.query(`
-        SELECT ItemId, Code, Name, UOM, Barcode, TrackBatch, TrackSerial, UnitCost, SellingPrice, MRP
+        SELECT ItemId, Code, Alias, Name, UOM, Barcode, TrackBatch, TrackSerial, UnitCost, SellingPrice, MRP
         FROM tblItem
-        WHERE Code = @itemCode OR Barcode = @itemCode
+        WHERE Code = @itemCode OR Alias = @itemCode OR Barcode = @itemCode
       `, { itemCode });
 
       if (items.length === 0) {
@@ -131,18 +132,23 @@ export class BarcodeController {
       }
 
       const item = items[0];
+      // Use ERP CODE (item.Code) as the primary item identifier for barcodeNumber and SKU
+      const barcodeNumber = item.Barcode || item.Code;
       const result: any = {
         itemCode: item.Code,
+        itemAlias: item.Alias,
         itemName: item.Name,
         uom: item.UOM,
-        barcodeNumber: item.Barcode || item.Code,
-        sku: item.Code,
+        barcodeNumber: barcodeNumber,  // Value encoded in barcode image and shown as barcode text below
+        sku: item.Code,                // Strictly use ERP CODE as SKU
         mrp: item.MRP ? Number(item.MRP).toFixed(2) : (item.UnitCost ? Number(item.UnitCost).toFixed(2) : '0.00'),
         salePrice: item.SellingPrice ? Number(item.SellingPrice).toFixed(2) : '0.00',
         mfgDate: '',
         expiryDate: '',
         batchNumber: batchNumber || '',
-        serialNumber: ''
+        serialNumber: '',
+        trackBatch: item.TrackBatch === 1 || item.TrackBatch === true || String(item.TrackBatch) === '1',
+        trackSerial: item.TrackSerial === 1 || item.TrackSerial === true || String(item.TrackSerial) === '1'
       };
 
       if (batchNumber) {
